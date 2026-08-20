@@ -1,5 +1,7 @@
 # agent-collaboration
 
+[繁體中文說明文件](README.zh-TW.md)
+
 Let separate AI CLI sessions in the same Git repository ask each other questions,
 delegate bounded work, and return results through tmux.
 
@@ -14,6 +16,22 @@ the filesystem for substantial context and tmux prompt injection as a lightweigh
 - Git
 - tmux with bracketed-paste support (`paste-buffer -p`)
 - Two or more AI CLI sessions running in tmux panes for the same Git repository
+
+### Installing tmux
+
+- **macOS** (Homebrew):
+  ```sh
+  brew install tmux
+  ```
+- **Ubuntu / Debian** (APT):
+  ```sh
+  sudo apt update
+  sudo apt install -y tmux
+  ```
+- **Verify installation**:
+  ```sh
+  tmux -V
+  ```
 
 The scripts are currently verified on macOS with tmux 3.7b and Bash 3.2.57. The
 included GitHub Actions workflow is configured to run the portable test suite on
@@ -64,16 +82,57 @@ the skill, restart that session.
 
 ## Use
 
-Start each AI CLI in a different tmux pane inside the same Git repository. In each
-session, register a unique name:
+`agent-collaboration` relies on the `$TMUX_PANE` environment variable provided by tmux to identify sessions. **You must enter a tmux session first, start each AI CLI in a different pane, and only then run `agent-register` from within each session.** Do not start AI CLIs in a regular terminal outside tmux and attempt to register afterwards.
+
+### Step 1: Create a tmux session and split panes
+
+Inside your Git repository root:
+
+```sh
+cd /path/to/your/git-repo
+
+# 1. Create a new tmux session (e.g. named agents)
+tmux new-session -s agents
+
+# 2. Split into a second pane
+tmux split-window -h
+
+# 3. Switch between panes (shortcut Ctrl-b o, or command tmux select-pane -t 0 / -t 1)
+```
+
+### Step 2: Start an AI CLI in each pane
+
+- **Pane 0** (first pane):
+  ```sh
+  codex
+  ```
+- **Pane 1** (second pane):
+  ```sh
+  claude
+  # or gemini
+  ```
+
+### Step 3: Register in each AI session
+
+In each AI CLI prompt, run the registration command:
 
 ```sh
 SKILL_DIR="<directory where your host installed agent-collaboration>"
 "$SKILL_DIR/scripts/agent-register" codex
+```
+
+Switch to the other pane's session and run:
+
+```sh
+SKILL_DIR="<directory where your host installed agent-collaboration>"
 "$SKILL_DIR/scripts/agent-register" claude
 ```
 
-Then send a prompt:
+> **Note**: Agent names normally match the CLI name (`codex`, `claude`, `gemini`). Never register two active sessions under the same name in one repository.
+
+### Step 4: Send a prompt
+
+From either session, use `agent-send` to prompt another registered agent:
 
 ```sh
 "$SKILL_DIR/scripts/agent-send" claude \

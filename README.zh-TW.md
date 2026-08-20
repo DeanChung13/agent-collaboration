@@ -12,6 +12,22 @@
 - 支援 Bracketed Paste 的 tmux（`paste-buffer -p`）
 - 兩個或更多在同一個 Git 儲存庫的 tmux pane 中執行的 AI CLI session
 
+### 安裝 tmux
+
+- **macOS**（Homebrew）：
+  ```sh
+  brew install tmux
+  ```
+- **Ubuntu / Debian**（APT）：
+  ```sh
+  sudo apt update
+  sudo apt install -y tmux
+  ```
+- **驗證安裝**：
+  ```sh
+  tmux -V
+  ```
+
 本腳本目前已在 macOS（tmux 3.7b、Bash 3.2.57）上完成驗證。專案隨附的 GitHub Actions workflow 設定會在發布後於 macOS 與 Ubuntu 上執行可攜性測試套件。在這些 CI 任務通過前，Linux 與其他 tmux 版本仍屬未驗證狀態；除腳本所使用的命令需求外，未聲明其他最低 tmux 版本需求。
 
 ## 安裝
