@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+NAME="${1:-}"
+
+if [ -z "$NAME" ]; then
+  echo "Usage: agent-register <name>" >&2
+  exit 1
+fi
+
+if [[ ! "$NAME" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+  echo "Invalid agent name '$NAME': use only letters, numbers, dots, hyphens, and underscores" >&2
+  exit 1
+fi
+
+PANE="${TMUX_PANE:-}"
+if [ -z "$PANE" ]; then
+  echo 'Error: Not running inside a tmux pane ($TMUX_PANE is not set).' >&2
+  exit 1
+fi
+
+PANE_PID="$(tmux display-message -p -t "$PANE" '#{pane_pid}' 2>/dev/null || true)"
+if [ -z "$PANE_PID" ]; then
+  echo "Error: Failed to obtain pane_pid for pane $PANE from tmux." >&2
+  exit 1
+fi
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+AGENTS_DIR="$ROOT/.agents"
+REGISTRY="$AGENTS_DIR/registry"
+GITIGNORE="$AGENTS_DIR/.gitignore"
+
+mkdir -p "$AGENTS_DIR/messages"
+
+if [ ! -f "$GITIGNORE" ]; then
+  printf 'registry\nmessages/\n' > "$GITIGNORE"
+fi
+
+TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$AGENTS_DIR/registry.tmp.XXXXXX")"
+trap 'rm -f "$TMP"' EXIT
+
+if [ ! -f "$REGISTRY" ]; then
+  printf '# agent-name    tmux-pane-id    pane-pid\n%-15s %-15s %s\n' "$NAME" "$PANE" "$PANE_PID" > "$TMP"
+else
+  awk -v name="$NAME" -v pane="$PANE" -v pid="$PANE_PID" '
+    BEGIN { found = 0 }
+    { sub(/\r$/, "") }
+    /^[[:space:]]*($|#)/ { print; next }
+    tolower($1) == tolower(name) {
+      if (!found) {
+        printf "%-15s %-15s %s\n", name, pane, pid
+        found = 1
+      }
+      next
+    }
+    { print }
+    END {
+      if (!found) printf "%-15s %-15s %s\n", name, pane, pid
+    }
+  ' "$REGISTRY" > "$TMP"
+fi
+
+mv -f "$TMP" "$REGISTRY"
+trap - EXIT
+
+echo "Registered $NAME -> $PANE (pid: $PANE_PID, $REGISTRY)"

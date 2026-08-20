@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+AGENT="${1:-}"
+shift || true
+MESSAGE="$*"
+
+if [ -z "$AGENT" ] || [ -z "$MESSAGE" ]; then
+  echo "Usage: agent-send <agent> <message>" >&2
+  exit 1
+fi
+
+ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+REGISTRY="$ROOT/.agents/registry"
+
+if [ ! -f "$REGISTRY" ]; then
+  echo "Agent registry not found: $REGISTRY" >&2
+  exit 1
+fi
+
+LOOKUP="$(awk -v agent="$AGENT" '
+  { sub(/\r$/, "") }
+  /^[[:space:]]*($|#)/ { next }
+  tolower($1) == tolower(agent) { print $2 " " $3; exit }
+' "$REGISTRY")"
+PANE="${LOOKUP%% *}"
+EXPECTED_PID="${LOOKUP#* }"
+
+if [ -z "$LOOKUP" ] || [ -z "$PANE" ]; then
+  echo "Agent not registered: $AGENT" >&2
+  exit 1
+fi
+
+if [ "$EXPECTED_PID" = "$PANE" ] || [ -z "$EXPECTED_PID" ]; then
+  echo "Stale or legacy registry entry for $AGENT (missing pane-pid in $REGISTRY)." >&2
+  exit 1
+fi
+
+if ! tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -Fqx -- "$PANE"; then
+  echo "tmux pane no longer exists: $PANE" >&2
+  exit 1
+fi
+
+CURRENT_PID="$(tmux display-message -p -t "$PANE" '#{pane_pid}' 2>/dev/null || true)"
+if [ "$CURRENT_PID" != "$EXPECTED_PID" ]; then
+  echo "Stale registry entry: pane $PANE belongs to a different process (current pid: ${CURRENT_PID:-none}, expected: $EXPECTED_PID)." >&2
+  exit 1
+fi
+
+if [ -n "${TMUX_PANE:-}" ] && [ "$PANE" = "$TMUX_PANE" ]; then
+  echo "Refusing to send to yourself: $AGENT is this pane ($PANE)" >&2
+  exit 1
+fi
+
+PANE_IN_MODE="$(tmux display-message -p -t "$PANE" '#{pane_in_mode}' 2>/dev/null || true)"
+if [ "$PANE_IN_MODE" != "0" ] && [ -n "$PANE_IN_MODE" ]; then
+  tmux send-keys -t "$PANE" -X cancel
+fi
+
+BUF="agent-send-$$-${RANDOM}"
+tmux set-buffer -b "$BUF" -- "$MESSAGE"
+tmux paste-buffer -p -d -b "$BUF" -t "$PANE"
+sleep 0.4
+tmux send-keys -t "$PANE" Enter
+
+echo "Sent to $AGENT ($PANE)"
