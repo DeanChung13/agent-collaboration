@@ -15,6 +15,7 @@ REGISTRY="$ROOT/.agents/registry"
 
 if [ ! -f "$REGISTRY" ]; then
   echo "Agent registry not found: $REGISTRY" >&2
+  echo "Register the running sessions first with agent-register." >&2
   exit 1
 fi
 
@@ -33,17 +34,20 @@ fi
 
 if [ "$EXPECTED_PID" = "$PANE" ] || [ -z "$EXPECTED_PID" ]; then
   echo "Stale or legacy registry entry for $AGENT (missing pane-pid in $REGISTRY)." >&2
+  echo "Re-run agent-register in that session." >&2
   exit 1
 fi
 
 if ! tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -Fqx -- "$PANE"; then
   echo "tmux pane no longer exists: $PANE" >&2
+  echo "The $AGENT session is gone. Do not guess a replacement pane; restart and re-register it." >&2
   exit 1
 fi
 
 CURRENT_PID="$(tmux display-message -p -t "$PANE" '#{pane_pid}' 2>/dev/null || true)"
 if [ "$CURRENT_PID" != "$EXPECTED_PID" ]; then
   echo "Stale registry entry: pane $PANE belongs to a different process (current pid: ${CURRENT_PID:-none}, expected: $EXPECTED_PID)." >&2
+  echo "Re-run agent-register in the $AGENT session." >&2
   exit 1
 fi
 

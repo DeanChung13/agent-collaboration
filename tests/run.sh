@@ -68,14 +68,23 @@ exit 1
 EOF
 chmod +x "$MOCK_BIN/git"
 
-# 1. Symlink install mode
+# 1. Symlink install mode (4 links: shared, codex, claude, gemini)
 INSTALL_HOME="$TEST_ROOT/home-install"
 mkdir -p "$INSTALL_HOME"
 MOCK_TMUX_LOG="$TEST_ROOT/install-tmux.log" HOME="$INSTALL_HOME" PATH="$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" --link >/dev/null
 [ -L "$INSTALL_HOME/.agents/skills/agent-collaboration" ] || fail 'installer creates shared skill link'
+[ -L "$INSTALL_HOME/.codex/skills/agent-collaboration" ] || fail 'installer creates Codex skill link'
 [ -L "$INSTALL_HOME/.claude/skills/agent-collaboration" ] || fail 'installer creates Claude skill link'
-pass 'installer links Codex/Gemini and Claude discovery paths'
+[ -L "$INSTALL_HOME/.gemini/skills/agent-collaboration" ] || fail 'installer creates Gemini skill link'
+pass 'installer links shared, Codex, Claude, and Gemini discovery paths'
+
+# 2. Custom CODEX_HOME install test
+CUSTOM_CODEX_HOME="$TEST_ROOT/custom-codex-dir"
+MOCK_TMUX_LOG="$TEST_ROOT/install-custom-codex.log" HOME="$INSTALL_HOME" CODEX_HOME="$CUSTOM_CODEX_HOME" \
+  PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/install.sh" --link >/dev/null
+[ -L "$CUSTOM_CODEX_HOME/skills/agent-collaboration" ] || fail 'installer respects custom CODEX_HOME'
+pass 'installer respects custom CODEX_HOME'
 
 mkdir -p "$INSTALL_HOME/.agents/skills/conflict"
 if MOCK_TMUX_LOG="$TEST_ROOT/install-tmux.log" HOME="$INSTALL_HOME" PATH="$MOCK_BIN:$PATH" \
@@ -85,7 +94,7 @@ else
   fail 'installer should be idempotent for matching links'
 fi
 
-# 2. Default copy install mode & update / force handling
+# 3. Default copy install mode & update / force handling
 INSTALL_COPY_HOME="$TEST_ROOT/home-copy"
 mkdir -p "$INSTALL_COPY_HOME"
 MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$MOCK_BIN:$PATH" \
@@ -93,8 +102,10 @@ MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH=
 [ -d "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration" ] || fail 'default install creates canonical copy'
 [ -x "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration/scripts/agent-send" ] || fail 'copied script has execute permission'
 [ -L "$INSTALL_COPY_HOME/.agents/skills/agent-collaboration" ] || fail 'default install links shared skill'
+[ -L "$INSTALL_COPY_HOME/.codex/skills/agent-collaboration" ] || fail 'default install links Codex skill'
 [ -L "$INSTALL_COPY_HOME/.claude/skills/agent-collaboration" ] || fail 'default install links Claude skill'
-pass 'default copy install creates canonical copy and discovery links'
+[ -L "$INSTALL_COPY_HOME/.gemini/skills/agent-collaboration" ] || fail 'default install links Gemini skill'
+pass 'default copy install creates canonical copy and all 4 discovery links'
 
 if MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" >/dev/null 2>&1; then
@@ -106,7 +117,39 @@ MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH=
   "$REPO_ROOT/install.sh" --force >/dev/null
 pass 'default copy install can be re-run and updated with --force'
 
-# 3. Registration & Agent validation tests
+# 4. SKILL.md portability check (no fixed host skill paths, contains SKILL_DIR)
+SKILL_FILE="$REPO_ROOT/SKILL.md"
+for bad_pattern in '~/.ai_skills' '~/.claude/skills' '~/.codex/skills' '~/.gemini/skills' '/Users/'; do
+  if grep -q "$bad_pattern" "$SKILL_FILE"; then
+    fail "SKILL.md contains hardcoded path: $bad_pattern"
+  fi
+done
+assert_contains "$(cat "$SKILL_FILE")" 'SKILL_DIR="<absolute directory containing this SKILL.md>"' 'SKILL.md defines SKILL_DIR placeholder'
+pass 'SKILL.md contains no hardcoded host paths and documents dynamic SKILL_DIR'
+
+# 5. Arbitrary installation directory script execution
+ARBITRARY_DIR="$TEST_ROOT/arbitrary-location/my-skill"
+mkdir -p "$ARBITRARY_DIR/scripts"
+cp "$REPO_ROOT/SKILL.md" "$ARBITRARY_DIR/SKILL.md"
+cp "$REPO_ROOT/scripts/agent-register" "$ARBITRARY_DIR/scripts/agent-register"
+cp "$REPO_ROOT/scripts/agent-send" "$ARBITRARY_DIR/scripts/agent-send"
+chmod +x "$ARBITRARY_DIR/scripts/"*
+
+RESOLVED_SKILL_DIR="$(cd "$ARBITRARY_DIR" && pwd -P)"
+ARBITRARY_PROJECT="$TEST_ROOT/arbitrary-project"
+mkdir -p "$ARBITRARY_PROJECT"
+
+ARB_REG_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PROJECT" MOCK_PANE_PID=5555 \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$RESOLVED_SKILL_DIR/scripts/agent-register" gemini)"
+assert_contains "$ARB_REG_OUT" 'Registered gemini -> %1' 'arbitrary dir register output'
+
+printf '%-15s %-15s %s\n' 'codex' '%2' '7777' >> "$ARBITRARY_PROJECT/.agents/registry"
+ARB_SEND_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PROJECT" MOCK_PANE_PID=7777 \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$RESOLVED_SKILL_DIR/scripts/agent-send" codex 'hello from arbitrary dir')"
+assert_contains "$ARB_SEND_OUT" 'Sent to codex (%2)' 'arbitrary dir send output'
+pass 'bundled scripts execute properly when resolved from arbitrary SKILL_DIR'
+
+# 6. Registration & Agent validation tests
 PROJECT="$TEST_ROOT/project"
 mkdir -p "$PROJECT"
 REGISTER_OUTPUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
@@ -136,7 +179,7 @@ if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=42
 fi
 pass 'agent-register rejects execution outside tmux (missing TMUX_PANE)'
 
-# 4. Message delivery & Quoting / Multiline / CJK tests
+# 7. Message delivery & Quoting / Multiline / CJK tests
 printf '%-15s %-15s %s\n' 'claude' '%2' '9001' >> "$PROJECT/.agents/registry"
 SEND_OUTPUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9001 \
   TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" claude 'hello world')"
@@ -159,7 +202,7 @@ BUFFER_CONTENT="$(cat "$MOCK_BUFFER_FILE")"
 [ "$BUFFER_CONTENT" = "$TEST_MSG" ] || fail "buffer payload mismatch: got '$BUFFER_CONTENT'"
 pass 'agent-send delivers multiline CJK and quoted message intact in set-buffer'
 
-# 5. Copy-mode cancellation regression test
+# 8. Copy-mode cancellation regression test
 COPY_MODE_LOG="$TEST_ROOT/tmux-copy-mode.log"
 MOCK_TMUX_LOG="$COPY_MODE_LOG" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9001 MOCK_PANE_IN_MODE=1 \
   TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" claude 'copy mode test' >/dev/null
@@ -173,7 +216,7 @@ case "$COPY_LOG_CONTENT" in
 esac
 pass 'agent-send cancels copy-mode when pane_in_mode is non-zero'
 
-# 6. Legacy format & Stale PID rejection tests
+# 9. Legacy format & Stale PID rejection tests
 LEGACY_PROJECT="$TEST_ROOT/legacy-project"
 mkdir -p "$LEGACY_PROJECT/.agents"
 printf '# agent-name    tmux-pane-id\n%-15s %s\n' 'legacyagent' '%2' > "$LEGACY_PROJECT/.agents/registry"

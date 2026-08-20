@@ -21,22 +21,28 @@ other agent's attention.
   conversation context.
 - Put large or structured content in `.agents/messages/` and send only its path.
 
-The default installer exposes the scripts at:
+Before running a bundled script, resolve `SKILL_DIR` to the absolute directory
+containing this loaded `SKILL.md`. Use that resolved path for the entire task; do
+not assume the skill lives under `.agents`, `.codex`, `.claude`, or `.gemini`.
+
+Commands below use this placeholder:
 
 ```sh
-$HOME/.agents/skills/agent-collaboration/scripts/agent-register
-$HOME/.agents/skills/agent-collaboration/scripts/agent-send
+SKILL_DIR="<absolute directory containing this SKILL.md>"
+"$SKILL_DIR/scripts/agent-register" <agent-name>
+"$SKILL_DIR/scripts/agent-send" <agent-name> "<message>"
 ```
 
-If the skill was installed elsewhere, resolve the scripts relative to this
-`SKILL.md` instead of assuming those paths.
+Replace the placeholder before execution. Hosts that install directly from GitHub
+may choose different directories, so never copy the sender's `SKILL_DIR` into a
+reply command for another agent.
 
 ## Set up each session
 
 From each AI CLI session running inside tmux and inside the same Git repository:
 
 ```sh
-$HOME/.agents/skills/agent-collaboration/scripts/agent-register <agent-name>
+"$SKILL_DIR/scripts/agent-register" <agent-name>
 ```
 
 Names normally identify the CLI, such as `codex`, `claude`, or `gemini`. Never
@@ -45,20 +51,22 @@ register two live sessions under the same name in one repository.
 ## Send a prompt
 
 ```sh
-$HOME/.agents/skills/agent-collaboration/scripts/agent-send <agent-name> "<message>"
+"$SKILL_DIR/scripts/agent-send" <agent-name> "<message>"
 ```
 
 Every outgoing message must include:
 
 1. The sender, such as `[from codex]`.
 2. The exact task or a repository-relative path containing it.
-3. A literal reply command when a response is required.
+3. An exact reply instruction when a response is required. Tell the peer to
+   resolve its own loaded `agent-collaboration` `SKILL_DIR`, then run its bundled
+   `agent-send`; do not send your local installation path.
 
 Example:
 
 ```sh
-$HOME/.agents/skills/agent-collaboration/scripts/agent-send gemini \
-  '[from codex] Review the current git diff for correctness. When done run: $HOME/.agents/skills/agent-collaboration/scripts/agent-send codex "[from gemini] <conclusion>"'
+"$SKILL_DIR/scripts/agent-send" gemini \
+  '[from codex] Review the current git diff for correctness. When done, resolve SKILL_DIR from your loaded agent-collaboration SKILL.md and run: "$SKILL_DIR/scripts/agent-send" codex "[from gemini] <conclusion>"'
 ```
 
 Send even when the peer appears busy. Its CLI may process the injected prompt

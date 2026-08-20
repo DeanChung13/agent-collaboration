@@ -46,7 +46,9 @@ fi
 DATA_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/agent-skills"
 CANONICAL="$DATA_ROOT/agent-collaboration"
 SHARED_LINK="$HOME/.agents/skills/agent-collaboration"
+CODEX_LINK="${CODEX_HOME:-$HOME/.codex}/skills/agent-collaboration"
 CLAUDE_LINK="$HOME/.claude/skills/agent-collaboration"
+GEMINI_LINK="$HOME/.gemini/skills/agent-collaboration"
 
 backup_or_refuse() {
   target="$1"
@@ -96,8 +98,12 @@ else
 fi
 
 install_link "$SHARED_LINK" "$SOURCE"
+install_link "$CODEX_LINK" "$SOURCE"
 install_link "$CLAUDE_LINK" "$SOURCE"
+install_link "$GEMINI_LINK" "$SOURCE"
 
 echo "Installed agent-collaboration from $SOURCE"
-echo "Codex/Gemini: $SHARED_LINK"
-echo "Claude Code:  $CLAUDE_LINK"
+echo "Shared agents: $SHARED_LINK"
+echo "Codex:         $CODEX_LINK"
+echo "Claude Code:   $CLAUDE_LINK"
+echo "Gemini:        $GEMINI_LINK"

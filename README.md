@@ -32,8 +32,10 @@ Clone the repository, then run:
 The installer copies the runtime skill to
 `~/.local/share/agent-skills/agent-collaboration` (or `$XDG_DATA_HOME`) and creates:
 
-- `~/.agents/skills/agent-collaboration` for Codex and Gemini CLI
+- `~/.agents/skills/agent-collaboration` for hosts supporting the shared alias
+- `$CODEX_HOME/skills/agent-collaboration` for Codex (`~/.codex/skills` by default)
 - `~/.claude/skills/agent-collaboration` for Claude Code
+- `~/.gemini/skills/agent-collaboration` for Gemini CLI and Antigravity
 
 Use `./install.sh --link` while developing to link directly to your clone. The
 installer refuses to replace existing paths. `--force` moves conflicts to
@@ -49,8 +51,11 @@ gemini skills install https://github.com/OWNER/agent-collaboration
 ```
 
 For Codex, you can ask `$skill-installer` to install the published GitHub
-repository. The local installer remains useful when sharing one canonical copy
-with Claude Code.
+repository. It installs into `$CODEX_HOME/skills` (default `~/.codex/skills`).
+The skill resolves bundled scripts from its own loaded `SKILL.md` path, so both
+native GitHub installation methods work without running this repository's
+installer. The local installer remains useful when sharing one canonical copy
+across all three hosts.
 
 After installation, Codex normally detects skill changes automatically. In Claude
 Code, restart if the top-level personal skills directory was created after the
@@ -63,14 +68,15 @@ Start each AI CLI in a different tmux pane inside the same Git repository. In ea
 session, register a unique name:
 
 ```sh
-~/.agents/skills/agent-collaboration/scripts/agent-register codex
-~/.agents/skills/agent-collaboration/scripts/agent-register claude
+SKILL_DIR="<directory where your host installed agent-collaboration>"
+"$SKILL_DIR/scripts/agent-register" codex
+"$SKILL_DIR/scripts/agent-register" claude
 ```
 
 Then send a prompt:
 
 ```sh
-~/.agents/skills/agent-collaboration/scripts/agent-send claude \
+"$SKILL_DIR/scripts/agent-send" claude \
   '[from codex] Review the current diff. Reply with agent-send when done.'
 ```
 
