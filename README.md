@@ -68,7 +68,7 @@ The previous canonical copy is preserved as a timestamped backup.
 Gemini CLI also supports installing a published repository directly:
 
 ```sh
-gemini skills install https://github.com/OWNER/agent-collaboration
+gemini skills install https://github.com/DeanChung13/agent-collaboration
 ```
 
 For Codex, you can ask `$skill-installer` to install the published GitHub

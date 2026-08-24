@@ -55,7 +55,7 @@ Clone 此儲存庫，然後執行：
 Gemini CLI 亦支援直接安裝已發布的儲存庫：
 
 ```sh
-gemini skills install https://github.com/OWNER/agent-collaboration
+gemini skills install https://github.com/DeanChung13/agent-collaboration
 ```
 
 針對 Codex，你可以要求 `$skill-installer` 安裝已發布的 GitHub 儲存庫。它會安裝至 `$CODEX_HOME/skills`（預設為 `~/.codex/skills`）。本 Skill 會從自身載入的 `SKILL.md` 路徑解析隨附的腳本，因此這兩種原生 GitHub 安裝方式均不需要執行此儲存庫的安裝程式即可運作。本機安裝程式在需要在三個 host 之間共用單一 canonical 複本時依然非常有用。
