@@ -15,7 +15,9 @@ usage() {
 Usage: agent-collab <command> [arguments...]
 
 Commands:
-  join <name>             Register the current tmux pane as an active agent
+  add <name>              Open a new tmux pane and start a collaborating AI
+  run <name>              Register this pane and launch a supported AI CLI
+  join <name>             Register the current pane without launching a CLI
   list                    List all registered agents in this repository
   send <agent> <message>  Send a prompt to another registered agent
 
@@ -26,13 +28,74 @@ EOF
 
 cmd="${1:-}"
 case "$cmd" in
+  add)
+    shift
+    if [ "$#" -ne 1 ]; then
+      echo "Usage: agent-collab add <agent-name>" >&2
+      exit 1
+    fi
+    agent_name="$1"
+    case "$agent_name" in
+      agy|claude|codex|gemini) ;;
+      *)
+        echo "Unsupported agent '$agent_name'. Supported agents: agy, claude, codex, gemini." >&2
+        exit 1
+        ;;
+    esac
+    if [ -z "${TMUX_PANE:-}" ]; then
+      echo 'Error: Cannot add a collaboration pane outside tmux.' >&2
+      exit 1
+    fi
+    ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    NEW_PANE="$(tmux split-window -d -P -F '#{pane_id}' -c "$ROOT" \
+      "$SCRIPT_DIR/agent-collab" run "$agent_name")"
+    REGISTRY="$ROOT/.agents/registry"
+    registered=0
+    for _ in {1..50}; do
+      if [ -f "$REGISTRY" ] && awk -v name="$agent_name" -v pane="$NEW_PANE" '
+        tolower($1) == tolower(name) && $2 == pane { found = 1 }
+        END { exit(found ? 0 : 1) }
+      ' "$REGISTRY"; then
+        registered=1
+        break
+      fi
+      sleep 0.1
+    done
+    if [ "$registered" -ne 1 ]; then
+      echo "Error: $agent_name did not register in $NEW_PANE." >&2
+      exit 1
+    fi
+    echo "Added $agent_name in $NEW_PANE"
+    ;;
+  run)
+    shift
+    if [ "$#" -ne 1 ]; then
+      echo "Usage: agent-collab run <agent-name>" >&2
+      exit 1
+    fi
+    agent_name="$1"
+    case "$agent_name" in
+      agy|claude|codex|gemini)
+        if ! command -v "$agent_name" >/dev/null 2>&1; then
+          echo "Error: Cannot launch $agent_name because '$agent_name' is not available in PATH." >&2
+          exit 1
+        fi
+        ;;
+      *)
+        echo "Unsupported agent '$agent_name'. Supported agents: agy, claude, codex, gemini." >&2
+        exit 1
+        ;;
+    esac
+    "$SCRIPT_DIR/agent-register" "$agent_name" "$$"
+    exec "$agent_name"
+    ;;
   join)
     shift
-    if [ "$#" -eq 0 ]; then
+    if [ "$#" -ne 1 ]; then
       echo "Usage: agent-collab join <agent-name>" >&2
       exit 1
     fi
-    exec "$SCRIPT_DIR/agent-register" "$@"
+    exec "$SCRIPT_DIR/agent-register" "$1"
     ;;
   send)
     shift
@@ -50,13 +113,32 @@ case "$cmd" in
       echo "No agents registered yet."
       exit 0
     fi
-    ENTRIES="$(awk '/^[[:space:]]*($|#)/ { next } { printf "  %-15s %-10s (pid: %s)\n", $1, $2, $3 }' "$REGISTRY")"
+    TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$ROOT/.agents/registry.tmp.XXXXXX")"
+    trap 'rm -f "$TMP"' EXIT
+    printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n' > "$TMP"
+    ENTRIES=""
+    while read -r name pane pane_pid agent_pid _; do
+      case "$name" in ''|'#'*) continue ;; esac
+      [ -n "$agent_pid" ] || continue
+      if ! kill -0 "$agent_pid" 2>/dev/null; then
+        continue
+      fi
+      current_pane_pid="$(tmux display-message -p -t "$pane" '#{pane_pid}' 2>/dev/null || true)"
+      if [ "$current_pane_pid" != "$pane_pid" ]; then
+        continue
+      fi
+      printf '%-15s %-15s %-15s %s\n' "$name" "$pane" "$pane_pid" "$agent_pid" >> "$TMP"
+      ENTRIES="${ENTRIES}  $(printf '%-15s %-10s (pid: %s)' "$name" "$pane" "$agent_pid")
+"
+    done < "$REGISTRY"
+    mv -f "$TMP" "$REGISTRY"
+    trap - EXIT
     if [ -z "$ENTRIES" ]; then
       echo "No agents registered yet."
       exit 0
     fi
     echo "Registered agents:"
-    echo "$ENTRIES"
+    printf '%s' "$ENTRIES"
     ;;
   -h|--help|help)
     usage

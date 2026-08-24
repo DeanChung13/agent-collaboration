@@ -43,6 +43,7 @@ case "${1:-}" in
     esac
     ;;
   list-panes) printf '%s\n' '%1' '%2' '%3' ;;
+  split-window) printf '%s\n' "${MOCK_NEW_PANE:-%9}" ;;
   set-buffer)
     shift
     while [ "$#" -gt 0 ]; do
@@ -67,6 +68,15 @@ fi
 exit 1
 EOF
 chmod +x "$MOCK_BIN/git"
+
+for mock_agent in agy claude codex gemini; do
+  cat > "$MOCK_BIN/$mock_agent" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+exit 0
+EOF
+  chmod +x "$MOCK_BIN/$mock_agent"
+done
 
 # 1. Symlink install mode (links: CLI bin, shared, codex, claude, gemini)
 INSTALL_HOME="$TEST_ROOT/home-install"
@@ -156,9 +166,11 @@ ARB_JOIN_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PR
 assert_contains "$ARB_JOIN_OUT" 'Registered gemini -> %1' 'symlinked agent-collab join output'
 
 # Test agent-collab list on populated registry
-printf '%-15s %-15s %s\n' 'codex' '%2' '7777' >> "$ARBITRARY_PROJECT/.agents/registry"
-ARB_LIST_OUT="$(MOCK_GIT_ROOT="$ARBITRARY_PROJECT" agent-collab list)"
-assert_contains "$ARB_LIST_OUT" 'gemini' 'agent-collab list output contains gemini'
+printf '%-15s %-15s %-15s %s\n' 'codex' '%2' '7777' "$$" >> "$ARBITRARY_PROJECT/.agents/registry"
+ARB_LIST_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_PANE_PID=7777 MOCK_GIT_ROOT="$ARBITRARY_PROJECT" agent-collab list)"
+if printf '%s\n' "$ARB_LIST_OUT" | grep -Fq 'gemini'; then
+  fail 'agent-collab list should remove the exited gemini process'
+fi
 assert_contains "$ARB_LIST_OUT" 'codex' 'agent-collab list output contains codex'
 
 ARB_SEND_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PROJECT" MOCK_PANE_PID=7777 \
@@ -181,6 +193,37 @@ assert_contains "$JOIN_OUTPUT" 'Registered codex -> %1' 'join output'
 assert_contains "$(cat "$PROJECT/.agents/registry")" 'codex' 'registry contains agent'
 assert_contains "$(cat "$PROJECT/.agents/registry")" '4242' 'registry contains pane pid'
 pass 'agent-collab join creates pid-bound registry entry'
+
+# agent-collab run registers the pane and launches the matching CLI.
+for launched_agent in agy claude codex gemini; do
+  AGENT_LAUNCH_LOG="$TEST_ROOT/$launched_agent-launch.log"
+  cat > "$MOCK_BIN/$launched_agent" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [ -n "${MOCK_AGENT_LAUNCH_LOG:-}" ]; then
+  printf '%s\n' "${MOCK_LAUNCHED_AGENT:?}" >> "$MOCK_AGENT_LAUNCH_LOG"
+fi
+EOF
+  chmod +x "$MOCK_BIN/$launched_agent"
+  AGENT_JOIN_OUTPUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9001 \
+    MOCK_LAUNCHED_AGENT="$launched_agent" MOCK_AGENT_LAUNCH_LOG="$AGENT_LAUNCH_LOG" \
+    TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" run "$launched_agent")"
+  assert_contains "$AGENT_JOIN_OUTPUT" "Registered $launched_agent -> %2" "$launched_agent run output"
+  assert_contains "$(cat "$AGENT_LAUNCH_LOG")" "$launched_agent" "$launched_agent CLI is launched"
+  assert_contains "$(cat "$PROJECT/.agents/registry")" "$launched_agent" "registry contains $launched_agent"
+done
+pass 'agent-collab run launches agy, claude, codex, and gemini after registration'
+
+# agent-collab add opens a detached pane that runs the lifecycle launcher
+ADD_TMUX_LOG="$TEST_ROOT/tmux-add.log"
+printf '%-15s %-15s %-15s %s\n' 'claude' '%8' '9001' "$$" >> "$PROJECT/.agents/registry"
+ADD_OUTPUT="$(MOCK_TMUX_LOG="$ADD_TMUX_LOG" MOCK_GIT_ROOT="$PROJECT" MOCK_NEW_PANE='%8' \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" add claude)"
+assert_contains "$ADD_OUTPUT" 'Added claude in %8' 'add confirms registration in the new pane'
+ADD_LOG_CONTENT="$(cat "$ADD_TMUX_LOG")"
+assert_contains "$ADD_LOG_CONTENT" 'split-window -d -P -F #{pane_id}' 'add creates a detached tmux pane'
+assert_contains "$ADD_LOG_CONTENT" 'agent-collab run claude' 'add starts the lifecycle launcher in the new pane'
+pass 'agent-collab add creates a pane and starts the requested collaborator'
 
 # agent-collab join idempotency
 MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
@@ -205,10 +248,26 @@ fi
 pass 'agent-collab join rejects execution outside tmux (missing TMUX_PANE)'
 
 # agent-collab list with registered agent
-POPULATED_LIST_OUT="$(MOCK_GIT_ROOT="$PROJECT" "$REPO_ROOT/scripts/agent-collab" list)"
-assert_contains "$POPULATED_LIST_OUT" 'codex' 'populated list contains codex'
+printf '%-15s %-15s %-15s %s\n' 'liveagent' '%1' '4242' "$$" >> "$PROJECT/.agents/registry"
+POPULATED_LIST_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" "$REPO_ROOT/scripts/agent-collab" list)"
+assert_contains "$POPULATED_LIST_OUT" 'liveagent' 'populated list contains a live agent'
 assert_contains "$POPULATED_LIST_OUT" '%1' 'populated list contains %1'
 pass 'agent-collab list displays registered agents'
+
+# agent-collab list removes entries whose registered process no longer exists
+PID_PROJECT="$TEST_ROOT/pid-project"
+mkdir -p "$PID_PROJECT/.agents"
+printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n%-15s %-15s %-15s %s\n%-15s %-15s %-15s %s\n' \
+  'liveagent' '%1' '4242' "$$" 'deadagent' '%2' '4242' '99999999' > "$PID_PROJECT/.agents/registry"
+PID_LIST_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PID_PROJECT" "$REPO_ROOT/scripts/agent-collab" list)"
+assert_contains "$PID_LIST_OUT" 'liveagent' 'list retains a live agent process'
+if printf '%s\n' "$PID_LIST_OUT" | grep -Fq 'deadagent'; then
+  fail 'list should hide an agent whose process no longer exists'
+fi
+if grep -Fq 'deadagent' "$PID_PROJECT/.agents/registry"; then
+  fail 'list should remove a dead agent from the registry'
+fi
+pass 'agent-collab list removes agents whose registered process no longer exists'
 
 # agent-collab unknown command and missing arguments
 if "$REPO_ROOT/scripts/agent-collab" unknown-cmd >/dev/null 2>&1; then
@@ -217,13 +276,19 @@ fi
 if "$REPO_ROOT/scripts/agent-collab" join >/dev/null 2>&1; then
   fail 'agent-collab join should require agent name'
 fi
+if "$REPO_ROOT/scripts/agent-collab" add >/dev/null 2>&1; then
+  fail 'agent-collab add should require agent name'
+fi
+if "$REPO_ROOT/scripts/agent-collab" run unknown-agent >/dev/null 2>&1; then
+  fail 'agent-collab run should reject unsupported agents'
+fi
 if "$REPO_ROOT/scripts/agent-collab" send claude >/dev/null 2>&1; then
   fail 'agent-collab send should require both target and message'
 fi
 pass 'agent-collab rejects unknown commands and missing arguments'
 
 # 7. Message delivery via agent-collab send & Quoting / Multiline / CJK tests
-printf '%-15s %-15s %s\n' 'claude' '%2' '9001' >> "$PROJECT/.agents/registry"
+printf '%-15s %-15s %-15s %s\n' 'claude' '%2' '9001' "$$" >> "$PROJECT/.agents/registry"
 SEND_OUTPUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9001 \
   TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send claude 'hello world')"
 assert_contains "$SEND_OUTPUT" 'Sent to claude (%2)' 'send output'
@@ -256,22 +321,22 @@ pass 'agent-collab send cancels copy-mode when pane_in_mode is non-zero'
 
 # 9. Legacy primitives & wrappers backward compatibility tests
 # agent-register directly
-MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=3333 \
+MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID="$$" \
   TMUX_PANE='%3' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-register" legacygemini >/dev/null
 assert_contains "$(cat "$PROJECT/.agents/registry")" 'legacygemini' 'legacy agent-register works'
 pass 'legacy agent-register directly creates registry entry'
 
 # agent-send directly
-LEGACY_SEND_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=3333 \
+LEGACY_SEND_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID="$$" \
   TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" legacygemini 'legacy send test')"
 assert_contains "$LEGACY_SEND_OUT" 'Sent to legacygemini (%3)' 'legacy agent-send output'
 pass 'legacy agent-send directly delivers message'
 
 # agent-join wrapper
-JOIN_WRAP_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4444 \
+JOIN_WRAP_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID="$$" \
   TMUX_PANE='%3' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-join" joinedagent)"
 assert_contains "$JOIN_WRAP_OUT" 'Registered joinedagent -> %3' 'agent-join wrapper output'
-JOIN_LIST_OUT="$(MOCK_GIT_ROOT="$PROJECT" "$REPO_ROOT/scripts/agent-join" --list)"
+JOIN_LIST_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID="$$" "$REPO_ROOT/scripts/agent-join" --list)"
 assert_contains "$JOIN_LIST_OUT" 'joinedagent' 'agent-join --list output'
 pass 'agent-join wrapper preserves join and --list options'
 

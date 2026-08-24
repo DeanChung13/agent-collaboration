@@ -22,18 +22,17 @@ fi
 LOOKUP="$(awk -v agent="$AGENT" '
   { sub(/\r$/, "") }
   /^[[:space:]]*($|#)/ { next }
-  tolower($1) == tolower(agent) { print $2 " " $3; exit }
+  tolower($1) == tolower(agent) { print $2 " " $3 " " $4; exit }
 ' "$REGISTRY")"
-PANE="${LOOKUP%% *}"
-EXPECTED_PID="${LOOKUP#* }"
+read -r PANE EXPECTED_PANE_PID EXPECTED_AGENT_PID <<< "$LOOKUP"
 
 if [ -z "$LOOKUP" ] || [ -z "$PANE" ]; then
   echo "Agent not registered: $AGENT" >&2
   exit 1
 fi
 
-if [ "$EXPECTED_PID" = "$PANE" ] || [ -z "$EXPECTED_PID" ]; then
-  echo "Stale or legacy registry entry for $AGENT (missing pane-pid in $REGISTRY)." >&2
+if [ -z "$EXPECTED_PANE_PID" ] || [ -z "$EXPECTED_AGENT_PID" ]; then
+  echo "Stale or legacy registry entry for $AGENT (missing lifecycle PID in $REGISTRY)." >&2
   echo "Re-run agent-register in that session." >&2
   exit 1
 fi
@@ -45,9 +44,14 @@ if ! tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -Fqx -- "$PANE"; then
 fi
 
 CURRENT_PID="$(tmux display-message -p -t "$PANE" '#{pane_pid}' 2>/dev/null || true)"
-if [ "$CURRENT_PID" != "$EXPECTED_PID" ]; then
-  echo "Stale registry entry: pane $PANE belongs to a different process (current pid: ${CURRENT_PID:-none}, expected: $EXPECTED_PID)." >&2
+if [ "$CURRENT_PID" != "$EXPECTED_PANE_PID" ]; then
+  echo "Stale registry entry: pane $PANE belongs to a different process (current pid: ${CURRENT_PID:-none}, expected: $EXPECTED_PANE_PID)." >&2
   echo "Re-run agent-register in the $AGENT session." >&2
+  exit 1
+fi
+
+if ! kill -0 "$EXPECTED_AGENT_PID" 2>/dev/null; then
+  echo "Agent process no longer exists: $AGENT (pid: $EXPECTED_AGENT_PID)." >&2
   exit 1
 fi
 

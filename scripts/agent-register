@@ -2,6 +2,7 @@
 set -euo pipefail
 
 NAME="${1:-}"
+AGENT_PID="${2:-}"
 
 if [ -z "$NAME" ]; then
   echo "Usage: agent-register <name>" >&2
@@ -25,6 +26,15 @@ if [ -z "$PANE_PID" ]; then
   exit 1
 fi
 
+if [ -z "$AGENT_PID" ]; then
+  AGENT_PID="$PANE_PID"
+fi
+
+if [[ ! "$AGENT_PID" =~ ^[0-9]+$ ]]; then
+  echo "Invalid agent process ID '$AGENT_PID'." >&2
+  exit 1
+fi
+
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 AGENTS_DIR="$ROOT/.agents"
 REGISTRY="$AGENTS_DIR/registry"
@@ -40,22 +50,23 @@ TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$AGENTS_DIR/regist
 trap 'rm -f "$TMP"' EXIT
 
 if [ ! -f "$REGISTRY" ]; then
-  printf '# agent-name    tmux-pane-id    pane-pid\n%-15s %-15s %s\n' "$NAME" "$PANE" "$PANE_PID" > "$TMP"
+  printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n%-15s %-15s %-15s %s\n' \
+    "$NAME" "$PANE" "$PANE_PID" "$AGENT_PID" > "$TMP"
 else
-  awk -v name="$NAME" -v pane="$PANE" -v pid="$PANE_PID" '
+  awk -v name="$NAME" -v pane="$PANE" -v pane_pid="$PANE_PID" -v agent_pid="$AGENT_PID" '
     BEGIN { found = 0 }
     { sub(/\r$/, "") }
     /^[[:space:]]*($|#)/ { print; next }
     tolower($1) == tolower(name) {
       if (!found) {
-        printf "%-15s %-15s %s\n", name, pane, pid
+        printf "%-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid
         found = 1
       }
       next
     }
     { print }
     END {
-      if (!found) printf "%-15s %-15s %s\n", name, pane, pid
+      if (!found) printf "%-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid
     }
   ' "$REGISTRY" > "$TMP"
 fi
@@ -63,4 +74,4 @@ fi
 mv -f "$TMP" "$REGISTRY"
 trap - EXIT
 
-echo "Registered $NAME -> $PANE (pid: $PANE_PID, $REGISTRY)"
+echo "Registered $NAME -> $PANE (pane pid: $PANE_PID, agent pid: $AGENT_PID, $REGISTRY)"

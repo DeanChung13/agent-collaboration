@@ -85,59 +85,55 @@ the skill, restart that session.
 
 ## Use
 
-`agent-collaboration` relies on the `$TMUX_PANE` environment variable provided by tmux to identify sessions. **Start each AI CLI in a different tmux pane, then use `agent-collab join` to register them.** Do not start AI CLIs outside tmux.
+`agent-collaboration` relies on tmux to host collaborating sessions. Start the first AI inside tmux, then ask it to add collaborators in natural language. The skill creates and manages the additional panes.
 
 ### Quick start
 
-1. Inside your Git repository, create a tmux session with multiple panes:
+1. Inside your Git repository, create a tmux session:
 
 ```sh
 cd /path/to/your/git-repo
 tmux new-session -s agents
-tmux split-window -h    # Creates a second pane
 ```
 
-2. Start an AI CLI in each pane:
-   - **Pane 1**: `codex`
-   - **Pane 2**: `claude` (or `gemini`)
-
-3. Register each agent using `agent-collab join`:
+2. Start your primary AI in the first pane, for example:
 
 ```sh
-agent-collab join codex
+codex
 ```
 
-Switch to the other pane and run:
+3. Ask the AI to add a collaborator:
 
-```sh
-agent-collab join claude
+```text
+Add Claude as a collaborator.
 ```
 
-Verify registered agents:
+To check collaborators, ask:
 
-```sh
-agent-collab list
+```text
+Which agents are collaborating?
 ```
 
-4. Send prompts between agents:
+4. Delegate in natural language:
 
-```sh
-agent-collab send claude \
-  '[from codex] Review the current diff. Reply with agent-collab send when done.'
+```text
+Ask Claude to review the current diff.
 ```
 
 > **Note**: If `agent-collab` is not in your `$PATH`, you can invoke it directly via `SKILL_DIR`:
 > ```sh
 > SKILL_DIR="<directory where your host installed agent-collaboration>"
-> "$SKILL_DIR/scripts/agent-collab" join codex
+> "$SKILL_DIR/scripts/agent-collab" add claude
 > ```
 
 ### Unified CLI: agent-collab
 
 `agent-collab` provides a single entry point for all operations:
 
-- `agent-collab join <agent-name>`: Registers the current session pane with validation and process ID tracking.
-- `agent-collab list`: Lists all registered co-agents in the current repository.
+- `agent-collab add <agent-name>`: Creates a new tmux pane, starts the requested AI, and confirms registration. This is normally called by the skill.
+- `agent-collab run <agent-name>`: Registers and launches an AI inside the new pane while binding the registry entry to its process lifecycle.
+- `agent-collab join <agent-name>`: Registers the current pane without launching an AI; retained for manual setup and backward compatibility.
+- `agent-collab list`: Lists live co-agents and atomically removes entries whose agent process exited or whose pane identity changed.
 - `agent-collab send <agent-name> <message>`: Delivers a prompt directly to the target agent pane.
 
 The low-level primitives (`agent-register`, `agent-send`) and the `agent-join` alias remain available for backward compatibility.
@@ -145,7 +141,7 @@ The low-level primitives (`agent-register`, `agent-send`) and the `agent-join` a
 ## Security model
 
 `agent-send` (and `agent-collab send`) only targets panes explicitly registered for the current repository.
-It binds each entry to the pane's shell PID, refuses self-delivery, and stops on
+It binds each entry to both the pane's shell PID and the AI process PID, refuses self-delivery, and stops on
 missing or stale panes instead of guessing a replacement.
 
 The tool deliberately performs prompt injection into another interactive agent

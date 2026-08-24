@@ -1,25 +1,29 @@
 ---
 name: agent-collaboration
 description: >-
-  Talk directly to another AI CLI session already running in a tmux pane for the
-  same Git project. Use when the user asks Codex, Claude Code, or Gemini CLI to
-  ask, review with, delegate to, or reply to another live agent session.
+  Add and work with collaborating AI CLI sessions in the same Git project. Use
+  when the user asks to add, start, list, ask, review with, delegate to, or reply
+  to Codex, Claude Code, Gemini CLI, or Agy.
 ---
 
 # Agent collaboration
 
-Use `agent-collab` to pass short prompts between independent AI CLI sessions.
-The agents share the repository filesystem; tmux prompt injection only gets the
-other agent's attention.
+Use `agent-collab` as the implementation behind natural-language collaboration.
+The user should be able to say “add Claude” or “ask Claude to review this” without
+being told to run shell commands themselves.
 
 ## Core model
 
-- `agent-collab join` records an agent name, tmux pane, and pane process ID in the
-  current Git repository's `.agents/registry`.
-- `agent-collab list` displays all currently registered co-agents.
+- `agent-collab add <name>` creates a sibling tmux pane, launches the requested AI,
+  and waits for registration. Use this when the user asks to add a collaborator.
+- `agent-collab run <name>` is the lifecycle launcher used inside the new pane. It
+  registers the pane and launches the matching CLI with the registered process ID.
+- `agent-collab join <name>` only registers the current pane. It is a manual and
+  backward-compatible setup primitive, not the normal user workflow.
+- `agent-collab list` displays live co-agents and removes entries whose AI process
+  exited or whose pane identity changed.
 - `agent-collab send` pastes a prompt into a registered pane and submits it.
-- The mechanism does not start sessions, queue messages, retry delivery, or carry
-  conversation context.
+- The mechanism does not queue messages, retry delivery, or carry conversation context.
 - Put large or structured content in `.agents/messages/` and send only its path.
 
 ## Unified CLI: agent-collab
@@ -28,9 +32,14 @@ When installed to your PATH (e.g. `~/.local/bin/agent-collab`), use `agent-colla
 
 ```sh
 agent-collab join <agent-name>
+agent-collab add <agent-name>
+agent-collab run <agent-name>
 agent-collab list
 agent-collab send <agent-name> "<message>"
 ```
+
+`add` and `run` support `agy`, `claude`, `codex`, and `gemini`; the matching
+executable must be in `PATH`.
 
 ### Script fallback with SKILL_DIR
 
@@ -39,25 +48,27 @@ containing this loaded `SKILL.md`:
 
 ```sh
 SKILL_DIR="<absolute directory containing this SKILL.md>"
-"$SKILL_DIR/scripts/agent-collab" join <agent-name>
+"$SKILL_DIR/scripts/agent-collab" add <agent-name>
 "$SKILL_DIR/scripts/agent-collab" list
 "$SKILL_DIR/scripts/agent-collab" send <agent-name> "<message>"
 ```
 
 Low-level primitives `"$SKILL_DIR/scripts/agent-register"`, `"$SKILL_DIR/scripts/agent-send"`, and alias `"$SKILL_DIR/scripts/agent-join"` remain supported for backward compatibility.
 
-## Set up each session
+## Add a collaborator
 
-From each AI CLI session running inside tmux and inside the same Git repository:
+When the user asks to add or start a collaborator, run:
 
 ```sh
-agent-collab join <agent-name>
+agent-collab add <agent-name>
 ```
 
-Names normally identify the CLI, such as `codex`, `claude`, or `gemini`. Never
-register two live sessions under the same name in one repository.
+Do not ask the user to open a pane or run this command. On success, report the
+agent and pane. If the current session is outside tmux or the executable is
+missing, explain that concrete blocker. Never register two live sessions under
+the same name in one repository.
 
-Check registered agents:
+Before sending work, check live agents:
 
 ```sh
 agent-collab list

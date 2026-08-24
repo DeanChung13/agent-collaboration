@@ -64,66 +64,62 @@ gemini skills install https://github.com/OWNER/agent-collaboration
 
 ## 使用方式
 
-`agent-collaboration` 依賴 tmux 提供之 `$TMUX_PANE` 環境變數來辨識與定位 session。**在不同的 tmux pane 內分別啟動每個 AI CLI，並使用 `agent-collab join` 完成註冊**。請勿在 tmux 外部啟動 AI CLI。
+`agent-collaboration` 使用 tmux 承載協作 session。只要先在 tmux 裡啟動主要 AI，接著直接用自然語言請它新增協作者；skill 會自行建立並管理其他 pane。
 
 ### 快速開始
 
-1. 在你的 Git 專案根目錄下建立 session 並開啟多個 pane：
+1. 在你的 Git 專案根目錄下建立 tmux session：
 
 ```sh
 cd /path/to/your/git-repo
 tmux new-session -s agents
-tmux split-window -h    # 分割出第二個 pane
 ```
 
-2. 在各 pane 中分別啟動 AI CLI：
-   - **Pane 1**：`codex`
-   - **Pane 2**：`claude`（或 `gemini`）
-
-3. 使用 `agent-collab join` 在各 AI session 中註冊：
+2. 在第一個 pane 啟動主要 AI，例如：
 
 ```sh
-agent-collab join codex
+codex
 ```
 
-切換至另一個 pane 的 session 內執行：
+3. 直接請 AI 新增協作者：
 
-```sh
-agent-collab join claude
+```text
+新增協作 claude
 ```
 
-檢視已註冊的 agent 清單：
+想確認目前有哪些協作者，直接問：
 
-```sh
-agent-collab list
+```text
+目前有哪些 AI 在協作？
 ```
 
-4. 發送 prompt：
+4. 直接用自然語言交辦：
 
-```sh
-agent-collab send claude \
-  '[from codex] Review the current diff. Reply with agent-collab send when done.'
+```text
+請 Claude review 目前的 diff
 ```
 
 > **注意**：若 `agent-collab` 尚未加入 `$PATH`，亦可直接透過 `SKILL_DIR` 呼叫：
 > ```sh
 > SKILL_DIR="<你的 host 安裝 agent-collaboration 的目錄>"
-> "$SKILL_DIR/scripts/agent-collab" join codex
+> "$SKILL_DIR/scripts/agent-collab" add claude
 > ```
 
 ### 統一 CLI：agent-collab
 
 `agent-collab` 提供單一入口處理所有協作操作：
 
-- `agent-collab join <agent-name>`：註冊目前的 session pane，具備自動檢查與 Process ID 綁定。
-- `agent-collab list`：列出當前儲存庫中所有已註冊的協作 agent。
+- `agent-collab add <agent-name>`：建立新的 tmux pane、啟動指定 AI，並確認完成註冊；正常情況由 skill 自行呼叫。
+- `agent-collab run <agent-name>`：在新 pane 內註冊並啟動 AI，讓 registry 項目跟隨 AI 程序的生命週期。
+- `agent-collab join <agent-name>`：只註冊目前 pane，不啟動 AI；保留給手動設定與向下相容用途。
+- `agent-collab list`：列出仍存活的協作 agent，並以原子操作移除 AI 程序已結束或 pane 身分已改變的項目。
 - `agent-collab send <agent-name> <message>`：將 prompt 直接投遞至目標 agent pane。
 
 底層原始腳本（`agent-register`、`agent-send`）與別名 `agent-join` 依然保留，以提供向下相容性。
 
 ## 安全模型
 
-`agent-send`（與 `agent-collab send`）只會以明確為當前儲存庫註冊的 pane 為目標。它會將每筆項目與該 pane 的 shell PID 綁定、拒絕自我發送，並在遇到遺失或過期的 pane 時停止執行，而非猜測替代 pane。
+`agent-send`（與 `agent-collab send`）只會以明確為當前儲存庫註冊的 pane 為目標。它會將每筆項目同時綁定至 pane 的 shell PID 與 AI 程序 PID、拒絕自我發送，並在遇到遺失或過期的 pane／程序時停止執行，而非猜測替代目標。
 
 本工具刻意對另一個互動式 agent session 執行 prompt injection。它**不提供身分驗證**：`[from claude]`、`[from codex]` 及類似標籤皆為自行宣告的純文字。任何以你的作業系統使用者身分執行且可控制 tmux 的行程，都可能操控已註冊的 pane。
 
