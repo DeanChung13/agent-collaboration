@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Portable symlink resolution
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd -P)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd -P)"
+
+usage() {
+  cat <<'EOF'
+Usage: agent-collab <command> [arguments...]
+
+Commands:
+  join <name>             Register the current tmux pane as an active agent
+  list                    List all registered agents in this repository
+  send <agent> <message>  Send a prompt to another registered agent
+
+Options:
+  -h, --help              Show this help message
+EOF
+}
+
+cmd="${1:-}"
+case "$cmd" in
+  join)
+    shift
+    if [ "$#" -eq 0 ]; then
+      echo "Usage: agent-collab join <agent-name>" >&2
+      exit 1
+    fi
+    exec "$SCRIPT_DIR/agent-register" "$@"
+    ;;
+  send)
+    shift
+    if [ "$#" -lt 2 ]; then
+      echo "Usage: agent-collab send <agent-name> <message>" >&2
+      exit 1
+    fi
+    exec "$SCRIPT_DIR/agent-send" "$@"
+    ;;
+  list)
+    shift
+    ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    REGISTRY="$ROOT/.agents/registry"
+    if [ ! -f "$REGISTRY" ]; then
+      echo "No agents registered yet."
+      exit 0
+    fi
+    ENTRIES="$(awk '/^[[:space:]]*($|#)/ { next } { printf "  %-15s %-10s (pid: %s)\n", $1, $2, $3 }' "$REGISTRY")"
+    if [ -z "$ENTRIES" ]; then
+      echo "No agents registered yet."
+      exit 0
+    fi
+    echo "Registered agents:"
+    echo "$ENTRIES"
+    ;;
+  -h|--help|help)
+    usage
+    exit 0
+    ;;
+  "")
+    usage >&2
+    exit 1
+    ;;
+  *)
+    echo "Unknown command: $cmd" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

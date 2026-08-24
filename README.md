@@ -50,10 +50,13 @@ Clone the repository, then run:
 The installer copies the runtime skill to
 `~/.local/share/agent-skills/agent-collaboration` (or `$XDG_DATA_HOME`) and creates:
 
+- `~/.local/bin/agent-collab` unified CLI entry point (or `$XDG_BIN_HOME/agent-collab`)
 - `~/.agents/skills/agent-collaboration` for hosts supporting the shared alias
 - `$CODEX_HOME/skills/agent-collaboration` for Codex (`~/.codex/skills` by default)
 - `~/.claude/skills/agent-collaboration` for Claude Code
 - `~/.gemini/skills/agent-collaboration` for Gemini CLI and Antigravity
+
+Make sure `~/.local/bin` is in your `$PATH` to run `agent-collab` directly from any terminal.
 
 Use `./install.sh --link` while developing to link directly to your clone. The
 installer refuses to replace existing paths. `--force` moves conflicts to
@@ -82,70 +85,66 @@ the skill, restart that session.
 
 ## Use
 
-`agent-collaboration` relies on the `$TMUX_PANE` environment variable provided by tmux to identify sessions. **You must enter a tmux session first, start each AI CLI in a different pane, and only then run `agent-register` from within each session.** Do not start AI CLIs in a regular terminal outside tmux and attempt to register afterwards.
+`agent-collaboration` relies on the `$TMUX_PANE` environment variable provided by tmux to identify sessions. **Start each AI CLI in a different tmux pane, then use `agent-collab join` to register them.** Do not start AI CLIs outside tmux.
 
-### Step 1: Create a tmux session and split panes
+### Quick start
 
-Inside your Git repository root:
+1. Inside your Git repository, create a tmux session with multiple panes:
 
 ```sh
 cd /path/to/your/git-repo
-
-# 1. Create a new tmux session (e.g. named agents)
 tmux new-session -s agents
-
-# 2. Split into a second pane
-tmux split-window -h
-
-# 3. Switch between panes (shortcut Ctrl-b o, or command tmux select-pane -t 0 / -t 1)
+tmux split-window -h    # Creates a second pane
 ```
 
-### Step 2: Start an AI CLI in each pane
+2. Start an AI CLI in each pane:
+   - **Pane 1**: `codex`
+   - **Pane 2**: `claude` (or `gemini`)
 
-- **Pane 0** (first pane):
-  ```sh
-  codex
-  ```
-- **Pane 1** (second pane):
-  ```sh
-  claude
-  # or gemini
-  ```
-
-### Step 3: Register in each AI session
-
-In each AI CLI prompt, run the registration command:
+3. Register each agent using `agent-collab join`:
 
 ```sh
-SKILL_DIR="<directory where your host installed agent-collaboration>"
-"$SKILL_DIR/scripts/agent-register" codex
+agent-collab join codex
 ```
 
-Switch to the other pane's session and run:
+Switch to the other pane and run:
 
 ```sh
-SKILL_DIR="<directory where your host installed agent-collaboration>"
-"$SKILL_DIR/scripts/agent-register" claude
+agent-collab join claude
 ```
 
-> **Note**: Agent names normally match the CLI name (`codex`, `claude`, `gemini`). Never register two active sessions under the same name in one repository.
-
-### Step 4: Send a prompt
-
-From either session, use `agent-send` to prompt another registered agent:
+Verify registered agents:
 
 ```sh
-"$SKILL_DIR/scripts/agent-send" claude \
-  '[from codex] Review the current diff. Reply with agent-send when done.'
+agent-collab list
 ```
 
-The registry and message exchange live under `.agents/` in the current Git root.
-On first registration, the tool creates `.agents/.gitignore` so live registry and
-message files stay local by default.
+4. Send prompts between agents:
+
+```sh
+agent-collab send claude \
+  '[from codex] Review the current diff. Reply with agent-collab send when done.'
+```
+
+> **Note**: If `agent-collab` is not in your `$PATH`, you can invoke it directly via `SKILL_DIR`:
+> ```sh
+> SKILL_DIR="<directory where your host installed agent-collaboration>"
+> "$SKILL_DIR/scripts/agent-collab" join codex
+> ```
+
+### Unified CLI: agent-collab
+
+`agent-collab` provides a single entry point for all operations:
+
+- `agent-collab join <agent-name>`: Registers the current session pane with validation and process ID tracking.
+- `agent-collab list`: Lists all registered co-agents in the current repository.
+- `agent-collab send <agent-name> <message>`: Delivers a prompt directly to the target agent pane.
+
+The low-level primitives (`agent-register`, `agent-send`) and the `agent-join` alias remain available for backward compatibility.
 
 ## Security model
 
-`agent-send` only targets panes explicitly registered for the current repository.
+`agent-send` (and `agent-collab send`) only targets panes explicitly registered for the current repository.
 It binds each entry to the pane's shell PID, refuses self-delivery, and stops on
 missing or stale panes instead of guessing a replacement.
 

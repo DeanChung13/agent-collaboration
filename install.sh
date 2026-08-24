@@ -45,6 +45,8 @@ fi
 
 DATA_ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/agent-skills"
 CANONICAL="$DATA_ROOT/agent-collaboration"
+BIN_DIR="${XDG_BIN_HOME:-$HOME/.local/bin}"
+BIN_LINK="$BIN_DIR/agent-collab"
 SHARED_LINK="$HOME/.agents/skills/agent-collaboration"
 CODEX_LINK="${CODEX_HOME:-$HOME/.codex}/skills/agent-collaboration"
 CLAUDE_LINK="$HOME/.claude/skills/agent-collaboration"
@@ -88,21 +90,25 @@ else
   trap 'rm -rf "$STAGING"' EXIT
   cp "$SCRIPT_DIR/SKILL.md" "$STAGING/SKILL.md"
   mkdir -p "$STAGING/scripts"
+  cp "$SCRIPT_DIR/scripts/agent-collab" "$STAGING/scripts/agent-collab"
   cp "$SCRIPT_DIR/scripts/agent-register" "$STAGING/scripts/agent-register"
   cp "$SCRIPT_DIR/scripts/agent-send" "$STAGING/scripts/agent-send"
-  chmod +x "$STAGING/scripts/agent-register" "$STAGING/scripts/agent-send"
+  cp "$SCRIPT_DIR/scripts/agent-join" "$STAGING/scripts/agent-join"
+  chmod +x "$STAGING/scripts/"*
   backup_or_refuse "$CANONICAL" "$STAGING"
   mv "$STAGING" "$CANONICAL"
   trap - EXIT
   SOURCE="$CANONICAL"
 fi
 
+install_link "$BIN_LINK" "$SOURCE/scripts/agent-collab"
 install_link "$SHARED_LINK" "$SOURCE"
 install_link "$CODEX_LINK" "$SOURCE"
 install_link "$CLAUDE_LINK" "$SOURCE"
 install_link "$GEMINI_LINK" "$SOURCE"
 
 echo "Installed agent-collaboration from $SOURCE"
+echo "CLI command:   $BIN_LINK"
 echo "Shared agents: $SHARED_LINK"
 echo "Codex:         $CODEX_LINK"
 echo "Claude Code:   $CLAUDE_LINK"

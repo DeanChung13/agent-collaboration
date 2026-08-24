@@ -40,10 +40,13 @@ Clone 此儲存庫，然後執行：
 
 安裝程式會將執行期的 skill 複製到 `~/.local/share/agent-skills/agent-collaboration`（或 `$XDG_DATA_HOME`），並建立以下連結：
 
+- `~/.local/bin/agent-collab`：統一 CLI 入口（或 `$XDG_BIN_HOME/agent-collab`）
 - `~/.agents/skills/agent-collaboration`：供支援 shared alias 的 host 使用
 - `$CODEX_HOME/skills/agent-collaboration`：供 Codex 使用（預設為 `~/.codex/skills`）
 - `~/.claude/skills/agent-collaboration`：供 Claude Code 使用
 - `~/.gemini/skills/agent-collaboration`：供 Gemini CLI 與 Antigravity 使用
+
+請確保 `~/.local/bin` 已包含在你的 `$PATH` 中，以便在任何終端機中直接執行 `agent-collab`。
 
 在開發時可使用 `./install.sh --link` 直接連結到你的 clone 目錄。安裝程式預設拒絕替換既有路徑；使用 `--force` 會在安裝前將衝突路徑移動至帶有時間戳記的備份目錄。
 
@@ -61,68 +64,66 @@ gemini skills install https://github.com/OWNER/agent-collaboration
 
 ## 使用方式
 
-`agent-collaboration` 依賴 tmux 提供之 `$TMUX_PANE` 環境變數來辨識與定位 session。**必須先進入 tmux session，在不同的 pane 內分別啟動每個 AI CLI，之後才在各自的 session 內執行 `agent-register`**。請勿在一般 terminal（非 tmux 環境）啟動 AI CLI 後才嘗試註冊。
+`agent-collaboration` 依賴 tmux 提供之 `$TMUX_PANE` 環境變數來辨識與定位 session。**在不同的 tmux pane 內分別啟動每個 AI CLI，並使用 `agent-collab join` 完成註冊**。請勿在 tmux 外部啟動 AI CLI。
 
-### 步驟 1：建立 tmux session 並分割 pane
+### 快速開始
 
-在你的 Git 專案根目錄下建立 session 並開啟多個 pane：
+1. 在你的 Git 專案根目錄下建立 session 並開啟多個 pane：
 
 ```sh
 cd /path/to/your/git-repo
-
-# 1. 建立新的 tmux session（例如命名為 agents）
 tmux new-session -s agents
-
-# 2. 分割出第二個 pane（水平或垂直分割）
-tmux split-window -h
-
-# 3. 在各 pane 間切換（快捷鍵 Ctrl-b o，或使用命令 tmux select-pane -t 0 / -t 1）
+tmux split-window -h    # 分割出第二個 pane
 ```
 
-### 步驟 2：在各 pane 中分別啟動 AI CLI
+2. 在各 pane 中分別啟動 AI CLI：
+   - **Pane 1**：`codex`
+   - **Pane 2**：`claude`（或 `gemini`）
 
-- **Pane 0**（第一個 pane）：
-  ```sh
-  codex
-  ```
-- **Pane 1**（第二個 pane）：
-  ```sh
-  claude
-  # 或使用 gemini
-  ```
-
-### 步驟 3：在各 AI session 中註冊
-
-在各自的 AI CLI 互動提示列中，執行註冊命令：
+3. 使用 `agent-collab join` 在各 AI session 中註冊：
 
 ```sh
-SKILL_DIR="<你的 host 安裝 agent-collaboration 的目錄>"
-"$SKILL_DIR/scripts/agent-register" codex
+agent-collab join codex
 ```
 
 切換至另一個 pane 的 session 內執行：
 
 ```sh
-SKILL_DIR="<你的 host 安裝 agent-collaboration 的目錄>"
-"$SKILL_DIR/scripts/agent-register" claude
+agent-collab join claude
 ```
 
-> **注意**：通常 agent 名稱即為其 CLI 名稱（如 `codex`、`claude`、`gemini`）。在同一個儲存庫中切勿將兩個活躍的 session 註冊為相同的名稱。
-
-### 步驟 4：發送 prompt
-
-在任一 session 內，透過 `agent-send` 向另一個已註冊的 agent 發送 prompt：
+檢視已註冊的 agent 清單：
 
 ```sh
-"$SKILL_DIR/scripts/agent-send" claude \
-  '[from codex] Review the current diff. Reply with agent-send when done.'
+agent-collab list
 ```
 
-註冊表與訊息交換位於當前 Git 根目錄底下的 `.agents/`。在首次註冊時，此工具會自動建立 `.agents/.gitignore`，因此即時的註冊表與訊息檔案預設會保留在本地端。
+4. 發送 prompt：
+
+```sh
+agent-collab send claude \
+  '[from codex] Review the current diff. Reply with agent-collab send when done.'
+```
+
+> **注意**：若 `agent-collab` 尚未加入 `$PATH`，亦可直接透過 `SKILL_DIR` 呼叫：
+> ```sh
+> SKILL_DIR="<你的 host 安裝 agent-collaboration 的目錄>"
+> "$SKILL_DIR/scripts/agent-collab" join codex
+> ```
+
+### 統一 CLI：agent-collab
+
+`agent-collab` 提供單一入口處理所有協作操作：
+
+- `agent-collab join <agent-name>`：註冊目前的 session pane，具備自動檢查與 Process ID 綁定。
+- `agent-collab list`：列出當前儲存庫中所有已註冊的協作 agent。
+- `agent-collab send <agent-name> <message>`：將 prompt 直接投遞至目標 agent pane。
+
+底層原始腳本（`agent-register`、`agent-send`）與別名 `agent-join` 依然保留，以提供向下相容性。
 
 ## 安全模型
 
-`agent-send` 只會以明確為當前儲存庫註冊的 pane 為目標。它會將每筆項目與該 pane 的 shell PID 綁定、拒絕自我發送，並在遇到遺失或過期的 pane 時停止執行，而非猜測替代 pane。
+`agent-send`（與 `agent-collab send`）只會以明確為當前儲存庫註冊的 pane 為目標。它會將每筆項目與該 pane 的 shell PID 綁定、拒絕自我發送，並在遇到遺失或過期的 pane 時停止執行，而非猜測替代 pane。
 
 本工具刻意對另一個互動式 agent session 執行 prompt injection。它**不提供身分驗證**：`[from claude]`、`[from codex]` 及類似標籤皆為自行宣告的純文字。任何以你的作業系統使用者身分執行且可控制 tmux 的行程，都可能操控已註冊的 pane。
 

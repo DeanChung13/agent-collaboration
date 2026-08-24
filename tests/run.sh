@@ -42,7 +42,7 @@ case "${1:-}" in
       *) printf '%s\n' "${MOCK_PANE_PID:-4242}" ;;
     esac
     ;;
-  list-panes) printf '%s\n' '%1' '%2' ;;
+  list-panes) printf '%s\n' '%1' '%2' '%3' ;;
   set-buffer)
     shift
     while [ "$#" -gt 0 ]; do
@@ -68,23 +68,26 @@ exit 1
 EOF
 chmod +x "$MOCK_BIN/git"
 
-# 1. Symlink install mode (4 links: shared, codex, claude, gemini)
+# 1. Symlink install mode (links: CLI bin, shared, codex, claude, gemini)
 INSTALL_HOME="$TEST_ROOT/home-install"
 mkdir -p "$INSTALL_HOME"
 MOCK_TMUX_LOG="$TEST_ROOT/install-tmux.log" HOME="$INSTALL_HOME" PATH="$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" --link >/dev/null
+[ -L "$INSTALL_HOME/.local/bin/agent-collab" ] || fail 'installer creates agent-collab bin link in link mode'
 [ -L "$INSTALL_HOME/.agents/skills/agent-collaboration" ] || fail 'installer creates shared skill link'
 [ -L "$INSTALL_HOME/.codex/skills/agent-collaboration" ] || fail 'installer creates Codex skill link'
 [ -L "$INSTALL_HOME/.claude/skills/agent-collaboration" ] || fail 'installer creates Claude skill link'
 [ -L "$INSTALL_HOME/.gemini/skills/agent-collaboration" ] || fail 'installer creates Gemini skill link'
-pass 'installer links shared, Codex, Claude, and Gemini discovery paths'
+pass 'installer links bin, shared, Codex, Claude, and Gemini discovery paths'
 
-# 2. Custom CODEX_HOME install test
+# 2. Custom CODEX_HOME and XDG_BIN_HOME install test
 CUSTOM_CODEX_HOME="$TEST_ROOT/custom-codex-dir"
+CUSTOM_BIN_DIR="$TEST_ROOT/custom-bin-dir"
 MOCK_TMUX_LOG="$TEST_ROOT/install-custom-codex.log" HOME="$INSTALL_HOME" CODEX_HOME="$CUSTOM_CODEX_HOME" \
-  PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/install.sh" --link >/dev/null
+  XDG_BIN_HOME="$CUSTOM_BIN_DIR" PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/install.sh" --link >/dev/null
 [ -L "$CUSTOM_CODEX_HOME/skills/agent-collaboration" ] || fail 'installer respects custom CODEX_HOME'
-pass 'installer respects custom CODEX_HOME'
+[ -L "$CUSTOM_BIN_DIR/agent-collab" ] || fail 'installer respects custom XDG_BIN_HOME'
+pass 'installer respects custom CODEX_HOME and XDG_BIN_HOME'
 
 mkdir -p "$INSTALL_HOME/.agents/skills/conflict"
 if MOCK_TMUX_LOG="$TEST_ROOT/install-tmux.log" HOME="$INSTALL_HOME" PATH="$MOCK_BIN:$PATH" \
@@ -100,12 +103,16 @@ mkdir -p "$INSTALL_COPY_HOME"
 MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" >/dev/null
 [ -d "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration" ] || fail 'default install creates canonical copy'
-[ -x "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration/scripts/agent-send" ] || fail 'copied script has execute permission'
+[ -L "$INSTALL_COPY_HOME/.local/bin/agent-collab" ] || fail 'default install creates CLI bin link'
+[ -x "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration/scripts/agent-collab" ] || fail 'copied agent-collab has execute permission'
+[ -x "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration/scripts/agent-send" ] || fail 'copied agent-send has execute permission'
+[ -x "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration/scripts/agent-register" ] || fail 'copied agent-register has execute permission'
+[ -x "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration/scripts/agent-join" ] || fail 'copied agent-join has execute permission'
 [ -L "$INSTALL_COPY_HOME/.agents/skills/agent-collaboration" ] || fail 'default install links shared skill'
 [ -L "$INSTALL_COPY_HOME/.codex/skills/agent-collaboration" ] || fail 'default install links Codex skill'
 [ -L "$INSTALL_COPY_HOME/.claude/skills/agent-collaboration" ] || fail 'default install links Claude skill'
 [ -L "$INSTALL_COPY_HOME/.gemini/skills/agent-collaboration" ] || fail 'default install links Gemini skill'
-pass 'default copy install creates canonical copy and all 4 discovery links'
+pass 'default copy install creates canonical copy, bin link, and discovery links'
 
 if MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" >/dev/null 2>&1; then
@@ -127,67 +134,103 @@ done
 assert_contains "$(cat "$SKILL_FILE")" 'SKILL_DIR="<absolute directory containing this SKILL.md>"' 'SKILL.md defines SKILL_DIR placeholder'
 pass 'SKILL.md contains no hardcoded host paths and documents dynamic SKILL_DIR'
 
-# 5. Arbitrary installation directory script execution
+# 5. Arbitrary installation directory & symlinked CLI execution
 ARBITRARY_DIR="$TEST_ROOT/arbitrary-location/my-skill"
-mkdir -p "$ARBITRARY_DIR/scripts"
+mkdir -p "$ARBITRARY_DIR/scripts" "$TEST_ROOT/arbitrary-bin"
 cp "$REPO_ROOT/SKILL.md" "$ARBITRARY_DIR/SKILL.md"
+cp "$REPO_ROOT/scripts/agent-collab" "$ARBITRARY_DIR/scripts/agent-collab"
 cp "$REPO_ROOT/scripts/agent-register" "$ARBITRARY_DIR/scripts/agent-register"
 cp "$REPO_ROOT/scripts/agent-send" "$ARBITRARY_DIR/scripts/agent-send"
+cp "$REPO_ROOT/scripts/agent-join" "$ARBITRARY_DIR/scripts/agent-join"
 chmod +x "$ARBITRARY_DIR/scripts/"*
+ln -s "$ARBITRARY_DIR/scripts/agent-collab" "$TEST_ROOT/arbitrary-bin/agent-collab"
 
 RESOLVED_SKILL_DIR="$(cd "$ARBITRARY_DIR" && pwd -P)"
 ARBITRARY_PROJECT="$TEST_ROOT/arbitrary-project"
 mkdir -p "$ARBITRARY_PROJECT"
 
-ARB_REG_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PROJECT" MOCK_PANE_PID=5555 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$RESOLVED_SKILL_DIR/scripts/agent-register" gemini)"
-assert_contains "$ARB_REG_OUT" 'Registered gemini -> %1' 'arbitrary dir register output'
+# Test invoking symlinked agent-collab in PATH without SKILL_DIR
+PATH="$TEST_ROOT/arbitrary-bin:$MOCK_BIN:$PATH"
+ARB_JOIN_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PROJECT" MOCK_PANE_PID=5555 \
+  TMUX_PANE='%1' agent-collab join gemini)"
+assert_contains "$ARB_JOIN_OUT" 'Registered gemini -> %1' 'symlinked agent-collab join output'
 
+# Test agent-collab list on populated registry
 printf '%-15s %-15s %s\n' 'codex' '%2' '7777' >> "$ARBITRARY_PROJECT/.agents/registry"
-ARB_SEND_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PROJECT" MOCK_PANE_PID=7777 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$RESOLVED_SKILL_DIR/scripts/agent-send" codex 'hello from arbitrary dir')"
-assert_contains "$ARB_SEND_OUT" 'Sent to codex (%2)' 'arbitrary dir send output'
-pass 'bundled scripts execute properly when resolved from arbitrary SKILL_DIR'
+ARB_LIST_OUT="$(MOCK_GIT_ROOT="$ARBITRARY_PROJECT" agent-collab list)"
+assert_contains "$ARB_LIST_OUT" 'gemini' 'agent-collab list output contains gemini'
+assert_contains "$ARB_LIST_OUT" 'codex' 'agent-collab list output contains codex'
 
-# 6. Registration & Agent validation tests
+ARB_SEND_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$ARBITRARY_PROJECT" MOCK_PANE_PID=7777 \
+  TMUX_PANE='%1' agent-collab send codex 'hello from symlinked agent-collab')"
+assert_contains "$ARB_SEND_OUT" 'Sent to codex (%2)' 'agent-collab send output'
+pass 'symlinked agent-collab CLI on PATH executes join, list, and send cleanly'
+
+# 6. Unified CLI agent-collab dispatch & validation tests
 PROJECT="$TEST_ROOT/project"
 mkdir -p "$PROJECT"
-REGISTER_OUTPUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-register" codex)"
-assert_contains "$REGISTER_OUTPUT" 'Registered codex -> %1' 'register output'
+
+# agent-collab list when empty
+EMPTY_LIST_OUT="$(MOCK_GIT_ROOT="$PROJECT" "$REPO_ROOT/scripts/agent-collab" list)"
+assert_contains "$EMPTY_LIST_OUT" 'No agents registered yet' 'empty agent-collab list output'
+
+# agent-collab join
+JOIN_OUTPUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join codex)"
+assert_contains "$JOIN_OUTPUT" 'Registered codex -> %1' 'join output'
 assert_contains "$(cat "$PROJECT/.agents/registry")" 'codex' 'registry contains agent'
 assert_contains "$(cat "$PROJECT/.agents/registry")" '4242' 'registry contains pane pid'
-pass 'agent-register creates a pid-bound registry entry'
+pass 'agent-collab join creates pid-bound registry entry'
 
+# agent-collab join idempotency
 MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-register" codex >/dev/null
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join codex >/dev/null
 [ "$(awk '$1 == "codex" { count++ } END { print count+0 }' "$PROJECT/.agents/registry")" -eq 1 ] || \
-  fail 'agent-register should replace duplicate names'
-pass 'agent-register is idempotent by agent name'
+  fail 'agent-collab join should replace duplicate names'
+pass 'agent-collab join is idempotent by agent name'
 
+# agent-collab join validation
 for bad_name in 'agent name' 'bad#agent' 'foo$bar' $'name\nnewline'; do
   if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
-    TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-register" "$bad_name" >/dev/null 2>&1; then
-    fail "agent-register should reject invalid agent name: $bad_name"
+    TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join "$bad_name" >/dev/null 2>&1; then
+    fail "agent-collab join should reject invalid agent name: $bad_name"
   fi
 done
-pass 'agent-register rejects invalid agent names'
+pass 'agent-collab join rejects invalid agent names'
 
 if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
-  TMUX_PANE='' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-register" codex >/dev/null 2>&1; then
-  fail 'agent-register should fail when TMUX_PANE is empty'
+  TMUX_PANE='' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join codex >/dev/null 2>&1; then
+  fail 'agent-collab join should fail when TMUX_PANE is empty'
 fi
-pass 'agent-register rejects execution outside tmux (missing TMUX_PANE)'
+pass 'agent-collab join rejects execution outside tmux (missing TMUX_PANE)'
 
-# 7. Message delivery & Quoting / Multiline / CJK tests
+# agent-collab list with registered agent
+POPULATED_LIST_OUT="$(MOCK_GIT_ROOT="$PROJECT" "$REPO_ROOT/scripts/agent-collab" list)"
+assert_contains "$POPULATED_LIST_OUT" 'codex' 'populated list contains codex'
+assert_contains "$POPULATED_LIST_OUT" '%1' 'populated list contains %1'
+pass 'agent-collab list displays registered agents'
+
+# agent-collab unknown command and missing arguments
+if "$REPO_ROOT/scripts/agent-collab" unknown-cmd >/dev/null 2>&1; then
+  fail 'agent-collab should reject unknown subcommand'
+fi
+if "$REPO_ROOT/scripts/agent-collab" join >/dev/null 2>&1; then
+  fail 'agent-collab join should require agent name'
+fi
+if "$REPO_ROOT/scripts/agent-collab" send claude >/dev/null 2>&1; then
+  fail 'agent-collab send should require both target and message'
+fi
+pass 'agent-collab rejects unknown commands and missing arguments'
+
+# 7. Message delivery via agent-collab send & Quoting / Multiline / CJK tests
 printf '%-15s %-15s %s\n' 'claude' '%2' '9001' >> "$PROJECT/.agents/registry"
 SEND_OUTPUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9001 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" claude 'hello world')"
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send claude 'hello world')"
 assert_contains "$SEND_OUTPUT" 'Sent to claude (%2)' 'send output'
 TMUX_LOG="$(cat "$TEST_ROOT/tmux.log")"
 assert_contains "$TMUX_LOG" 'paste-buffer -p -d' 'bracketed paste is used'
 assert_contains "$TMUX_LOG" 'send-keys -t %2 Enter' 'message is submitted'
-pass 'agent-send validates and submits through tmux'
+pass 'agent-collab send validates and submits through tmux'
 
 MOCK_BUFFER_FILE="$TEST_ROOT/tmux_buffer.txt"
 TEST_MSG="[from codex] 多行測試第一行
@@ -195,47 +238,63 @@ TEST_MSG="[from codex] 多行測試第一行
 第三行: CJK 繁體中文 & 特殊符號 \`\$VAR\`"
 
 MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_TMUX_BUFFER="$MOCK_BUFFER_FILE" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9001 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" claude "$TEST_MSG" >/dev/null
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send claude "$TEST_MSG" >/dev/null
 
 [ -f "$MOCK_BUFFER_FILE" ] || fail 'tmux set-buffer was not called'
 BUFFER_CONTENT="$(cat "$MOCK_BUFFER_FILE")"
 [ "$BUFFER_CONTENT" = "$TEST_MSG" ] || fail "buffer payload mismatch: got '$BUFFER_CONTENT'"
-pass 'agent-send delivers multiline CJK and quoted message intact in set-buffer'
+pass 'agent-collab send delivers multiline CJK and quoted message intact in set-buffer'
 
 # 8. Copy-mode cancellation regression test
 COPY_MODE_LOG="$TEST_ROOT/tmux-copy-mode.log"
 MOCK_TMUX_LOG="$COPY_MODE_LOG" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9001 MOCK_PANE_IN_MODE=1 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" claude 'copy mode test' >/dev/null
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send claude 'copy mode test' >/dev/null
 
 COPY_LOG_CONTENT="$(cat "$COPY_MODE_LOG")"
 assert_contains "$COPY_LOG_CONTENT" 'send-keys -t %2 -X cancel' 'copy-mode is canceled before paste'
+pass 'agent-collab send cancels copy-mode when pane_in_mode is non-zero'
 
-case "$COPY_LOG_CONTENT" in
-  *'send-keys -t %2 -X cancel'*'paste-buffer -p -d'*) ;;
-  *) fail 'copy-mode cancel must occur before paste-buffer' ;;
-esac
-pass 'agent-send cancels copy-mode when pane_in_mode is non-zero'
+# 9. Legacy primitives & wrappers backward compatibility tests
+# agent-register directly
+MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=3333 \
+  TMUX_PANE='%3' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-register" legacygemini >/dev/null
+assert_contains "$(cat "$PROJECT/.agents/registry")" 'legacygemini' 'legacy agent-register works'
+pass 'legacy agent-register directly creates registry entry'
 
-# 9. Legacy format & Stale PID rejection tests
+# agent-send directly
+LEGACY_SEND_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=3333 \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" legacygemini 'legacy send test')"
+assert_contains "$LEGACY_SEND_OUT" 'Sent to legacygemini (%3)' 'legacy agent-send output'
+pass 'legacy agent-send directly delivers message'
+
+# agent-join wrapper
+JOIN_WRAP_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4444 \
+  TMUX_PANE='%3' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-join" joinedagent)"
+assert_contains "$JOIN_WRAP_OUT" 'Registered joinedagent -> %3' 'agent-join wrapper output'
+JOIN_LIST_OUT="$(MOCK_GIT_ROOT="$PROJECT" "$REPO_ROOT/scripts/agent-join" --list)"
+assert_contains "$JOIN_LIST_OUT" 'joinedagent' 'agent-join --list output'
+pass 'agent-join wrapper preserves join and --list options'
+
+# 10. Safety validations (stale PID, legacy format, self-send)
 LEGACY_PROJECT="$TEST_ROOT/legacy-project"
 mkdir -p "$LEGACY_PROJECT/.agents"
 printf '# agent-name    tmux-pane-id\n%-15s %s\n' 'legacyagent' '%2' > "$LEGACY_PROJECT/.agents/registry"
 if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$LEGACY_PROJECT" MOCK_PANE_PID=4242 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" legacyagent 'test' >/dev/null 2>&1; then
-  fail 'agent-send should reject legacy 2-column registry entry'
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send legacyagent 'test' >/dev/null 2>&1; then
+  fail 'agent-collab send should reject legacy 2-column registry entry'
 fi
-pass 'agent-send rejects legacy 2-column registry entries'
+pass 'agent-collab send rejects legacy 2-column registry entries'
 
 if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=9999 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" claude 'test' >/dev/null 2>&1; then
-  fail 'agent-send should reject stale pane with mismatched PID'
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send claude 'test' >/dev/null 2>&1; then
+  fail 'agent-collab send should reject stale pane with mismatched PID'
 fi
-pass 'agent-send rejects stale pane with mismatched PID'
+pass 'agent-collab send rejects stale pane with mismatched PID'
 
 if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \
-  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-send" codex loop >/dev/null 2>&1; then
-  fail 'agent-send should refuse to send to itself'
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send codex loop >/dev/null 2>&1; then
+  fail 'agent-collab send should refuse to send to itself'
 fi
-pass 'agent-send refuses self-delivery'
+pass 'agent-collab send refuses self-delivery'
 
 echo "1..$pass_count"

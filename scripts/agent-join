@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Portable symlink resolution
+SOURCE="${BASH_SOURCE[0]}"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd "$(dirname "$SOURCE")" && pwd -P)"
+  SOURCE="$(readlink "$SOURCE")"
+  [[ $SOURCE != /* ]] && SOURCE="$DIR/$SOURCE"
+done
+SCRIPT_DIR="$(cd "$(dirname "$SOURCE")" && pwd -P)"
+
+case "${1:-}" in
+  --list)
+    exec "$SCRIPT_DIR/agent-collab" list
+    ;;
+  --help|-h)
+    cat <<'EOF'
+Usage: agent-join [OPTIONS] [AGENT_NAME]
+
+Join the co-agent collaboration network for this repository.
+(Convenience alias for 'agent-collab join')
+
+OPTIONS:
+  AGENT_NAME    Agent to register (e.g., codex, claude, gemini)
+  --list        List all registered agents
+  --help        Show this help message
+EOF
+    exit 0
+    ;;
+  "")
+    echo "Error: agent name required" >&2
+    echo "Usage: agent-join <agent-name>" >&2
+    exit 1
+    ;;
+  *)
+    exec "$SCRIPT_DIR/agent-collab" join "$@"
+    ;;
+esac
