@@ -113,3 +113,13 @@ echo "Shared agents: $SHARED_LINK"
 echo "Codex:         $CODEX_LINK"
 echo "Claude Code:   $CLAUDE_LINK"
 echo "Gemini:        $GEMINI_LINK"
+
+case ":${PATH:-}:" in
+  *":$BIN_DIR:"*) ;;
+  *)
+    echo "Warning: $BIN_DIR is not in PATH for this shell." >&2
+    echo "Human CLI use: add this line to your shell profile, then restart the shell:" >&2
+    echo "  export PATH=\"$BIN_DIR:\$PATH\"" >&2
+    echo "AI hosts should use the absolute bundled CLI from their loaded SKILL.md." >&2
+    ;;
+esac

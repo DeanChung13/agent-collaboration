@@ -46,7 +46,7 @@ Clone 此儲存庫，然後執行：
 - `~/.claude/skills/agent-collaboration`：供 Claude Code 使用
 - `~/.gemini/skills/agent-collaboration`：供 Gemini CLI 與 Antigravity 使用
 
-請確保 `~/.local/bin` 已包含在你的 `$PATH` 中，以便在任何終端機中直接執行 `agent-collab`。
+若目前 shell 的 `$PATH` 未包含所選 bin 目錄，安裝程式會提出警告，並顯示應加入 shell profile 的確切 export 指令。只有使用者在終端機直接呼叫 `agent-collab` 時需要這個 PATH；AI host 會從已載入的 `SKILL.md` 解析 bundled CLI，因此不會因 host 保留舊的 PATH 快照而找不到指令或選到不同安裝。
 
 在開發時可使用 `./install.sh --link` 直接連結到你的 clone 目錄。安裝程式預設拒絕替換既有路徑；使用 `--force` 會在安裝前將衝突路徑移動至帶有時間戳記的備份目錄。
 
@@ -99,10 +99,11 @@ codex
 請 Claude review 目前的 diff
 ```
 
-> **注意**：若 `agent-collab` 尚未加入 `$PATH`，亦可直接透過 `SKILL_DIR` 呼叫：
+> **注意**：AI host 應一律透過 `SKILL_DIR` 呼叫 bundled CLI，不依賴 `$PATH`：
 > ```sh
 > SKILL_DIR="<你的 host 安裝 agent-collaboration 的目錄>"
-> "$SKILL_DIR/scripts/agent-collab" add claude
+> AGENT_COLLAB="$SKILL_DIR/scripts/agent-collab"
+> "$AGENT_COLLAB" add claude
 > ```
 
 ### 統一 CLI：agent-collab

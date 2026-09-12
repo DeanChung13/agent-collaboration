@@ -81,7 +81,7 @@ done
 # 1. Symlink install mode (links: CLI bin, shared, codex, claude, gemini)
 INSTALL_HOME="$TEST_ROOT/home-install"
 mkdir -p "$INSTALL_HOME"
-MOCK_TMUX_LOG="$TEST_ROOT/install-tmux.log" HOME="$INSTALL_HOME" PATH="$MOCK_BIN:$PATH" \
+MOCK_TMUX_LOG="$TEST_ROOT/install-tmux.log" HOME="$INSTALL_HOME" PATH="$INSTALL_HOME/.local/bin:$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" --link >/dev/null
 [ -L "$INSTALL_HOME/.local/bin/agent-collab" ] || fail 'installer creates agent-collab bin link in link mode'
 [ -L "$INSTALL_HOME/.agents/skills/agent-collaboration" ] || fail 'installer creates shared skill link'
@@ -94,10 +94,20 @@ pass 'installer links bin, shared, Codex, Claude, and Gemini discovery paths'
 CUSTOM_CODEX_HOME="$TEST_ROOT/custom-codex-dir"
 CUSTOM_BIN_DIR="$TEST_ROOT/custom-bin-dir"
 MOCK_TMUX_LOG="$TEST_ROOT/install-custom-codex.log" HOME="$INSTALL_HOME" CODEX_HOME="$CUSTOM_CODEX_HOME" \
-  XDG_BIN_HOME="$CUSTOM_BIN_DIR" PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/install.sh" --link >/dev/null
+  XDG_BIN_HOME="$CUSTOM_BIN_DIR" PATH="$CUSTOM_BIN_DIR:$MOCK_BIN:$PATH" "$REPO_ROOT/install.sh" --link >/dev/null
 [ -L "$CUSTOM_CODEX_HOME/skills/agent-collaboration" ] || fail 'installer respects custom CODEX_HOME'
 [ -L "$CUSTOM_BIN_DIR/agent-collab" ] || fail 'installer respects custom XDG_BIN_HOME'
 pass 'installer respects custom CODEX_HOME and XDG_BIN_HOME'
+
+# Installer warns instead of silently leaving the CLI unreachable from a PATH snapshot.
+PATH_WARNING_FILE="$TEST_ROOT/install-path-warning.txt"
+PATH_WITHOUT_BIN="$MOCK_BIN:/usr/bin:/bin"
+MOCK_TMUX_LOG="$TEST_ROOT/install-path-warning-tmux.log" HOME="$TEST_ROOT/home-path-warning" \
+  XDG_BIN_HOME="$TEST_ROOT/not-on-path-bin" PATH="$PATH_WITHOUT_BIN" \
+  "$REPO_ROOT/install.sh" --link >/dev/null 2>"$PATH_WARNING_FILE"
+assert_contains "$(cat "$PATH_WARNING_FILE")" 'is not in PATH for this shell' 'installer warns when bin directory is absent from PATH'
+assert_contains "$(cat "$PATH_WARNING_FILE")" 'AI hosts should use the absolute bundled CLI' 'installer gives deterministic AI-host guidance'
+pass 'installer reports a missing CLI PATH entry with actionable guidance'
 
 mkdir -p "$INSTALL_HOME/.agents/skills/conflict"
 if MOCK_TMUX_LOG="$TEST_ROOT/install-tmux.log" HOME="$INSTALL_HOME" PATH="$MOCK_BIN:$PATH" \
@@ -110,7 +120,7 @@ fi
 # 3. Default copy install mode & update / force handling
 INSTALL_COPY_HOME="$TEST_ROOT/home-copy"
 mkdir -p "$INSTALL_COPY_HOME"
-MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$MOCK_BIN:$PATH" \
+MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$INSTALL_COPY_HOME/.local/bin:$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" >/dev/null
 [ -d "$INSTALL_COPY_HOME/.local/share/agent-skills/agent-collaboration" ] || fail 'default install creates canonical copy'
 [ -L "$INSTALL_COPY_HOME/.local/bin/agent-collab" ] || fail 'default install creates CLI bin link'
@@ -130,7 +140,7 @@ if MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PA
 fi
 pass 'default copy install refuses overwrite without --force'
 
-MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$MOCK_BIN:$PATH" \
+MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$INSTALL_COPY_HOME/.local/bin:$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" --force >/dev/null
 pass 'default copy install can be re-run and updated with --force'
 
@@ -141,8 +151,10 @@ for bad_pattern in '~/.ai_skills' '~/.claude/skills' '~/.codex/skills' '~/.gemin
     fail "SKILL.md contains hardcoded path: $bad_pattern"
   fi
 done
-assert_contains "$(cat "$SKILL_FILE")" 'SKILL_DIR="<absolute directory containing this SKILL.md>"' 'SKILL.md defines SKILL_DIR placeholder'
-pass 'SKILL.md contains no hardcoded host paths and documents dynamic SKILL_DIR'
+assert_contains "$(cat "$SKILL_FILE")" 'SKILL_DIR="<absolute directory containing this loaded SKILL.md>"' 'SKILL.md defines SKILL_DIR placeholder'
+assert_contains "$(cat "$SKILL_FILE")" 'AGENT_COLLAB="$SKILL_DIR/scripts/agent-collab"' 'SKILL.md resolves the bundled CLI once'
+assert_contains "$(cat "$SKILL_FILE")" 'Do not invoke a bare' 'SKILL.md rejects PATH-dependent agent invocation'
+pass 'SKILL.md contains no hardcoded host paths and requires deterministic bundled CLI resolution'
 
 # 5. Arbitrary installation directory & symlinked CLI execution
 ARBITRARY_DIR="$TEST_ROOT/arbitrary-location/my-skill"

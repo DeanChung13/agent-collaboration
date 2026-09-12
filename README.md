@@ -56,7 +56,11 @@ The installer copies the runtime skill to
 - `~/.claude/skills/agent-collaboration` for Claude Code
 - `~/.gemini/skills/agent-collaboration` for Gemini CLI and Antigravity
 
-Make sure `~/.local/bin` is in your `$PATH` to run `agent-collab` directly from any terminal.
+The installer warns when the selected bin directory is absent from the current
+shell's `$PATH`, and prints the exact export to add to your shell profile. This
+PATH entry is only needed for humans invoking `agent-collab` directly. AI hosts
+use the bundled CLI resolved from their loaded `SKILL.md`, so a stale host PATH
+snapshot cannot select a missing or different installation.
 
 Use `./install.sh --link` while developing to link directly to your clone. The
 installer refuses to replace existing paths. `--force` moves conflicts to
@@ -120,10 +124,11 @@ Which agents are collaborating?
 Ask Claude to review the current diff.
 ```
 
-> **Note**: If `agent-collab` is not in your `$PATH`, you can invoke it directly via `SKILL_DIR`:
+> **Note**: AI hosts should always invoke the bundled CLI via `SKILL_DIR`, independent of `$PATH`:
 > ```sh
 > SKILL_DIR="<directory where your host installed agent-collaboration>"
-> "$SKILL_DIR/scripts/agent-collab" add claude
+> AGENT_COLLAB="$SKILL_DIR/scripts/agent-collab"
+> "$AGENT_COLLAB" add claude
 > ```
 
 ### Unified CLI: agent-collab
