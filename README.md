@@ -63,11 +63,11 @@ use the bundled CLI resolved from their loaded `SKILL.md`, so a stale host PATH
 snapshot cannot select a missing or different installation.
 
 Use `./install.sh --link` while developing to link directly to your clone. The
-installer refuses to replace existing paths. `--force` moves conflicts to
-timestamped backups before installing.
+installer refuses to replace existing paths. `--force` overwrites conflicting
+installs directly.
 
-To update a copy-mode installation from a newer clone, run `./install.sh --force`.
-The previous canonical copy is preserved as a timestamped backup.
+To update a copy-mode installation from a newer clone, run `./install.sh --force`
+to overwrite with the latest version.
 
 Gemini CLI also supports installing a published repository directly:
 

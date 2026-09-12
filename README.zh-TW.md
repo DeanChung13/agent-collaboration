@@ -48,9 +48,9 @@ Clone 此儲存庫，然後執行：
 
 若目前 shell 的 `$PATH` 未包含所選 bin 目錄，安裝程式會提出警告，並顯示應加入 shell profile 的確切 export 指令。只有使用者在終端機直接呼叫 `agent-collab` 時需要這個 PATH；AI host 會從已載入的 `SKILL.md` 解析 bundled CLI，因此不會因 host 保留舊的 PATH 快照而找不到指令或選到不同安裝。
 
-在開發時可使用 `./install.sh --link` 直接連結到你的 clone 目錄。安裝程式預設拒絕替換既有路徑；使用 `--force` 會在安裝前將衝突路徑移動至帶有時間戳記的備份目錄。
+在開發時可使用 `./install.sh --link` 直接連結到你的 clone 目錄。安裝程式預設拒絕替換既有路徑；使用 `--force` 會直接覆蓋衝突的既有安裝。
 
-若要從較新的 clone 更新 copy 模式的安裝，請執行 `./install.sh --force`。先前的 canonical 複本將會保留為帶有時間戳記的備份。
+若要從較新的 clone 更新 copy 模式的安裝，請執行 `./install.sh --force` 直接覆蓋為最新版。
 
 Gemini CLI 亦支援直接安裝已發布的儲存庫：
 

@@ -142,6 +142,7 @@ pass 'default copy install refuses overwrite without --force'
 
 MOCK_TMUX_LOG="$TEST_ROOT/install-copy-tmux.log" HOME="$INSTALL_COPY_HOME" PATH="$INSTALL_COPY_HOME/.local/bin:$MOCK_BIN:$PATH" \
   "$REPO_ROOT/install.sh" --force >/dev/null
+[ -z "$(find "$INSTALL_COPY_HOME/.local/share/agent-skills" -maxdepth 1 -name '*.backup.*')" ] || fail 'force install should overwrite directly without backup directories'
 pass 'default copy install can be re-run and updated with --force'
 
 # 4. SKILL.md portability check (no fixed host skill paths, contains SKILL_DIR)
