@@ -39,6 +39,7 @@ case "${1:-}" in
     case "$*" in
       *'#{pane_in_mode}'*) printf '%s\n' "${MOCK_PANE_IN_MODE:-0}" ;;
       *'#{pane_pid}'*) printf '%s\n' "${MOCK_PANE_PID:-4242}" ;;
+      *'#{session_name}'*) printf '%s\n' "${MOCK_SESSION_NAME:-work}" ;;
       *) printf '%s\n' "${MOCK_PANE_PID:-4242}" ;;
     esac
     ;;
@@ -158,7 +159,9 @@ assert_contains "$(cat "$SKILL_FILE")" 'Do not invoke a bare' 'SKILL.md rejects 
 pass 'SKILL.md contains no hardcoded host paths and requires deterministic bundled CLI resolution'
 
 assert_contains "$(cat "$SKILL_FILE")" '"$AGENT_COLLAB" join <your-own-agent-name>' 'SKILL.md tells the host session to register itself'
-assert_contains "$(cat "$SKILL_FILE")" 'add` refuses a name that is already live' 'SKILL.md documents the duplicate refusal'
+assert_contains "$(cat "$SKILL_FILE")" '`add` and `join` both refuse a name that is' 'SKILL.md documents the duplicate refusal'
+assert_contains "$(cat "$SKILL_FILE")" 'keyed by' 'SKILL.md explains the registry is not scoped by tmux session'
+assert_contains "$(cat "$SKILL_FILE")" 'join --force <agent-name>' 'SKILL.md documents the join override'
 pass 'SKILL.md requires self-registration before adding collaborators'
 
 # 5. Arbitrary installation directory & symlinked CLI execution
@@ -254,7 +257,7 @@ if MOCK_TMUX_LOG="$DUP_TMUX_LOG" MOCK_GIT_ROOT="$DUP_PROJECT" MOCK_PANE_PID=4242
   >/dev/null 2>"$DUP_ERR"; then
   fail 'agent-collab add should refuse a duplicate live agent'
 fi
-assert_contains "$(cat "$DUP_ERR")" 'already running in %6' 'add names the pane holding the live agent'
+assert_contains "$(cat "$DUP_ERR")" 'already running in work:%6' 'add names the session and pane holding the live agent'
 if [ -f "$DUP_TMUX_LOG" ] && grep -Fq 'split-window' "$DUP_TMUX_LOG"; then
   fail 'agent-collab add should not open a pane when refusing a duplicate'
 fi
@@ -294,6 +297,83 @@ if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=42
   fail 'agent-collab join should fail when TMUX_PANE is empty'
 fi
 pass 'agent-collab join rejects execution outside tmux (missing TMUX_PANE)'
+
+# join refuses a name that another live pane already holds
+JOIN_DUP="$TEST_ROOT/join-dup"
+mkdir -p "$JOIN_DUP/.agents"
+printf '# agent-name    tmux-pane-id    pane-pid        agent-pid       tmux-session\n%-15s %-15s %-15s %-15s %s\n' \
+  'claude' '%6' '4242' "$$" 'other' > "$JOIN_DUP/.agents/registry"
+JOIN_DUP_BEFORE="$(cat "$JOIN_DUP/.agents/registry")"
+JOIN_DUP_ERR="$TEST_ROOT/join-dup.err"
+if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$JOIN_DUP" MOCK_PANE_PID=4242 \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join claude \
+  >/dev/null 2>"$JOIN_DUP_ERR"; then
+  fail 'agent-collab join should refuse a name held by another live pane'
+fi
+assert_contains "$(cat "$JOIN_DUP_ERR")" 'already registered to a live pane (work:%6)' \
+  'join names the session and pane already holding the name'
+assert_contains "$(cat "$JOIN_DUP_ERR")" 'claude-2' 'join suggests a distinct name'
+assert_contains "$(cat "$JOIN_DUP_ERR")" '--force' 'join documents the override'
+[ "$(cat "$JOIN_DUP/.agents/registry")" = "$JOIN_DUP_BEFORE" ] || \
+  fail 'agent-collab join must not rewrite the registry when it refuses'
+pass 'agent-collab join refuses to silently take over a live name'
+
+# --force overrides the guard and rebinds the name to this pane
+MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$JOIN_DUP" MOCK_PANE_PID=4242 \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join --force claude >/dev/null
+[ "$(awk '$1 == "claude" { print $2 }' "$JOIN_DUP/.agents/registry")" = '%1' ] || \
+  fail 'agent-collab join --force should rebind the name to the current pane'
+[ "$(awk '$1 == "claude" { count++ } END { print count+0 }' "$JOIN_DUP/.agents/registry")" -eq 1 ] || \
+  fail 'agent-collab join --force should leave exactly one entry'
+pass 'agent-collab join --force takes over a live name'
+
+# join parses flags instead of registering them as agent names
+JOIN_FLAG_PROJECT="$TEST_ROOT/join-flags"
+mkdir -p "$JOIN_FLAG_PROJECT/.agents"
+JOIN_HELP_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$JOIN_FLAG_PROJECT" MOCK_PANE_PID=4242 \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join --help)"
+assert_contains "$JOIN_HELP_OUT" 'Usage: agent-collab join [--force] <agent-name>' 'join --help explains itself'
+[ ! -f "$JOIN_FLAG_PROJECT/.agents/registry" ] || \
+  fail 'agent-collab join --help must not register anything'
+for bad_args in '--nope codex' 'codex extra'; do
+  # shellcheck disable=SC2086
+  if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$JOIN_FLAG_PROJECT" MOCK_PANE_PID=4242 \
+    TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" join $bad_args >/dev/null 2>&1; then
+    fail "agent-collab join should reject arguments: $bad_args"
+  fi
+done
+[ ! -f "$JOIN_FLAG_PROJECT/.agents/registry" ] || \
+  fail 'agent-collab join must not register anything for bad arguments'
+pass 'agent-collab join parses options instead of registering them'
+
+# the registry records which tmux session a pane belongs to
+SESSION_PROJECT="$TEST_ROOT/session-project"
+mkdir -p "$SESSION_PROJECT/.agents"
+SESSION_JOIN_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$SESSION_PROJECT" MOCK_PANE_PID=4242 \
+  MOCK_SESSION_NAME='keyly-2' TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" \
+  "$REPO_ROOT/scripts/agent-collab" join codex)"
+assert_contains "$SESSION_JOIN_OUT" 'in session keyly-2' 'join reports the tmux session'
+[ "$(awk '$1 == "codex" { print $5 }' "$SESSION_PROJECT/.agents/registry")" = 'keyly-2' ] || \
+  fail 'registry should record the tmux session name in column 5'
+[ "$(awk '$1 == "codex" { print $4 }' "$SESSION_PROJECT/.agents/registry")" = '4242' ] || \
+  fail 'agent-pid must stay in column 4 for backward compatibility'
+pass 'agent-register records the tmux session without moving existing columns'
+
+# list shows the session and backfills legacy four-column rows
+LEGACY_LIST="$TEST_ROOT/legacy-list"
+mkdir -p "$LEGACY_LIST/.agents"
+printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n%-15s %-15s %-15s %s\n' \
+  'legacy' '%1' '4242' "$$" > "$LEGACY_LIST/.agents/registry"
+LEGACY_LIST_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$LEGACY_LIST" MOCK_PANE_PID=4242 \
+  MOCK_SESSION_NAME='keyly' TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" \
+  "$REPO_ROOT/scripts/agent-collab" list)"
+assert_contains "$LEGACY_LIST_OUT" 'legacy' 'list keeps the legacy entry'
+assert_contains "$LEGACY_LIST_OUT" 'keyly' 'list displays the tmux session'
+[ "$(awk '$1 == "legacy" { print $5 }' "$LEGACY_LIST/.agents/registry")" = 'keyly' ] || \
+  fail 'list should backfill the session column for legacy rows'
+[ "$(awk '$1 == "legacy" { print $4 }' "$LEGACY_LIST/.agents/registry")" = "$$" ] || \
+  fail 'list must not shift the agent-pid column'
+pass 'agent-collab list reports and backfills the tmux session column'
 
 # agent-collab list with registered agent
 printf '%-15s %-15s %-15s %s\n' 'liveagent' '%1' '4242' "$$" >> "$PROJECT/.agents/registry"

@@ -18,8 +18,13 @@ being told to run shell commands themselves.
   and waits for registration. Use this when the user asks to add a collaborator.
 - `agent-collab run <name>` is the lifecycle launcher used inside the new pane. It
   registers the pane and launches the matching CLI with the registered process ID.
-- `agent-collab join <name>` only registers the current pane. It is a manual and
-  backward-compatible setup primitive, not the normal user workflow.
+- `agent-collab join [--force] <name>` only registers the current pane. It is a
+  manual and backward-compatible setup primitive, not the normal user workflow.
+  It refuses a name another live pane already holds; `--force` takes it over.
+- The registry lives at `.agents/registry`, one file per git repository, keyed by
+  agent name alone. It is not scoped by tmux session: two sessions open on the
+  same repository share one set of names. The `tmux-session` column is recorded
+  for diagnostics only and never disambiguates a name.
 - `agent-collab list` displays live co-agents and removes entries whose AI process
   exited or whose pane identity changed.
 - `agent-collab send` pastes a prompt into a registered pane and submits it.
@@ -37,6 +42,7 @@ installation. Resolve the CLI from the absolute directory containing this loaded
 SKILL_DIR="<absolute directory containing this loaded SKILL.md>"
 AGENT_COLLAB="$SKILL_DIR/scripts/agent-collab"
 "$AGENT_COLLAB" join <agent-name>
+"$AGENT_COLLAB" join --force <agent-name>
 "$AGENT_COLLAB" add <agent-name>
 "$AGENT_COLLAB" run <agent-name>
 "$AGENT_COLLAB" list
@@ -68,10 +74,18 @@ When the user asks to add or start a collaborator, run:
 Do not ask the user to open a pane or run this command. On success, report the
 agent and pane. If the current session is outside tmux or the executable is
 missing, explain that concrete blocker. Never register two live sessions under
-the same name in one repository: `add` refuses a name that is already live, and
-reports the pane that holds it. When it refuses, do not work around it by
-picking a different name — reach the existing session with `send`, or tell the
-user that agent is already running.
+the same name in one repository: `add` and `join` both refuse a name that is
+already live, and report the session and pane that holds it. When `add` refuses,
+do not work around it by picking a different name — reach the existing session
+with `send`, or tell the user that agent is already running.
+
+`join` is the one place where a distinct name is the right answer, because the
+pane asking to join is a real second session rather than a duplicate launch. If
+you are a second AI session on a repository whose registry already holds your
+CLI's name, register under a distinct one (`claude-2`, `codex-2`) and tell the
+user which name you took. Use `--force` only when the user confirms the existing
+entry is a leftover to be replaced; it rebinds the name and silently redirects
+every later message for it to your pane.
 
 Before sending work, check live agents:
 

@@ -17,12 +17,13 @@ Usage: agent-collab <command> [arguments...]
 Commands:
   add <name>              Open a new tmux pane and start a collaborating AI
   run <name>              Register this pane and launch a supported AI CLI
-  join <name>             Register the current pane without launching a CLI
+  join [--force] <name>   Register the current pane without launching a CLI
   list                    List all registered agents in this repository
   send <agent> <message>  Send a prompt to another registered agent
 
 Options:
   -h, --help              Show this help message
+      --force             (join only) Take over a name that is still live
 EOF
 }
 
@@ -44,6 +45,17 @@ live_pane() {
     printf '%s\n' "$entry_pane"
     return 0
   done < "$registry"
+}
+
+# Describe a pane as "session:%id" for human-readable errors, falling back to the
+# bare pane id when tmux cannot resolve a session name.
+pane_label() {
+  pane="$1"
+  session="$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)"
+  case "$session" in
+    ''|*[[:space:]]*) printf '%s\n' "$pane" ;;
+    *) printf '%s:%s\n' "$session" "$pane" ;;
+  esac
 }
 
 cmd="${1:-}"
@@ -70,7 +82,7 @@ case "$cmd" in
     REGISTRY="$ROOT/.agents/registry"
     existing_pane="$(live_pane "$REGISTRY" "$agent_name")"
     if [ -n "$existing_pane" ]; then
-      echo "Error: $agent_name is already running in $existing_pane; not starting a second one." >&2
+      echo "Error: $agent_name is already running in $(pane_label "$existing_pane"); not starting a second one." >&2
       echo "Use 'agent-collab send $agent_name <message>' to reach it." >&2
       exit 1
     fi
@@ -117,11 +129,58 @@ case "$cmd" in
     ;;
   join)
     shift
-    if [ "$#" -ne 1 ]; then
-      echo "Usage: agent-collab join <agent-name>" >&2
+    force=0
+    join_name=""
+    join_extra=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -h|--help)
+          echo "Usage: agent-collab join [--force] <agent-name>"
+          echo
+          echo "Register the current tmux pane under <agent-name> in this repository."
+          echo "Refuses a name that another live pane already holds; --force takes it over."
+          exit 0
+          ;;
+        --force)
+          force=1
+          shift
+          ;;
+        --)
+          shift
+          ;;
+        -*)
+          echo "Unknown option for join: $1" >&2
+          echo "Usage: agent-collab join [--force] <agent-name>" >&2
+          exit 1
+          ;;
+        *)
+          if [ -n "$join_name" ]; then
+            join_extra=1
+          else
+            join_name="$1"
+          fi
+          shift
+          ;;
+      esac
+    done
+    if [ -z "$join_name" ] || [ "$join_extra" -ne 0 ]; then
+      echo "Usage: agent-collab join [--force] <agent-name>" >&2
       exit 1
     fi
-    exec "$SCRIPT_DIR/agent-register" "$1"
+    if [ "$force" -ne 1 ]; then
+      ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+      REGISTRY="$ROOT/.agents/registry"
+      existing_pane="$(live_pane "$REGISTRY" "$join_name")"
+      if [ -n "$existing_pane" ] && [ "$existing_pane" != "${TMUX_PANE:-}" ]; then
+        echo "Error: $join_name is already registered to a live pane ($(pane_label "$existing_pane"))." >&2
+        echo "The registry is keyed by name across the whole repository, so registering" >&2
+        echo "again would silently redirect that agent's messages to this pane." >&2
+        echo "Pick a distinct name (e.g. ${join_name}-2), reach it with" >&2
+        echo "'agent-collab send $join_name <message>', or re-run with --force to take over." >&2
+        exit 1
+      fi
+    fi
+    exec "$SCRIPT_DIR/agent-register" "$join_name"
     ;;
   send)
     shift
@@ -141,9 +200,9 @@ case "$cmd" in
     fi
     TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$ROOT/.agents/registry.tmp.XXXXXX")"
     trap 'rm -f "$TMP"' EXIT
-    printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n' > "$TMP"
+    printf '# agent-name    tmux-pane-id    pane-pid        agent-pid       tmux-session\n' > "$TMP"
     ENTRIES=""
-    while read -r name pane pane_pid agent_pid _; do
+    while read -r name pane pane_pid agent_pid session _; do
       case "$name" in ''|'#'*) continue ;; esac
       [ -n "$agent_pid" ] || continue
       if ! kill -0 "$agent_pid" 2>/dev/null; then
@@ -153,8 +212,15 @@ case "$cmd" in
       if [ "$current_pane_pid" != "$pane_pid" ]; then
         continue
       fi
-      printf '%-15s %-15s %-15s %s\n' "$name" "$pane" "$pane_pid" "$agent_pid" >> "$TMP"
-      ENTRIES="${ENTRIES}  $(printf '%-15s %-10s (pid: %s)' "$name" "$pane" "$agent_pid")
+      current_session="$(tmux display-message -p -t "$pane" '#{session_name}' 2>/dev/null || true)"
+      case "$current_session" in
+        ''|*[[:space:]]*) current_session="${session:--}" ;;
+      esac
+      case "$current_session" in
+        ''|*[[:space:]]*) current_session='-' ;;
+      esac
+      printf '%-15s %-15s %-15s %-15s %s\n' "$name" "$pane" "$pane_pid" "$agent_pid" "$current_session" >> "$TMP"
+      ENTRIES="${ENTRIES}  $(printf '%-15s %-15s %-10s (pid: %s)' "$name" "$current_session" "$pane" "$agent_pid")
 "
     done < "$REGISTRY"
     mv -f "$TMP" "$REGISTRY"

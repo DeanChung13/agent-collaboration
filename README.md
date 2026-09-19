@@ -139,7 +139,9 @@ Ask Claude to review the current diff.
 
 - `agent-collab add <agent-name>`: Creates a new tmux pane, starts the requested AI, and confirms registration. Refuses to start a second session under a name that is already live, and reports the pane holding it. This is normally called by the skill.
 - `agent-collab run <agent-name>`: Registers and launches an AI inside the new pane while binding the registry entry to its process lifecycle.
-- `agent-collab join <agent-name>`: Registers the current pane without launching an AI; retained for manual setup and backward compatibility.
+- `agent-collab join [--force] <agent-name>`: Registers the current pane without launching an AI; retained for manual setup and backward compatibility. It refuses a name another live pane already holds, because the registry is keyed by name across the whole repository and re-registering would silently redirect that agent's messages. Pass `--force` to take the name over deliberately.
+
+The registry is one file per repository (`.agents/registry`) and is **not** scoped by tmux session: two sessions open on the same repository share one set of names. Give the second session's agents distinct names (`claude-2`, `codex-2`). The `tmux-session` column is recorded for diagnostics and shown by `list`; it never disambiguates a name.
 - `agent-collab list`: Lists live co-agents and atomically removes entries whose agent process exited or whose pane identity changed.
 - `agent-collab send <agent-name> <message>`: Delivers a prompt directly to the target agent pane.
 

@@ -26,6 +26,12 @@ if [ -z "$PANE_PID" ]; then
   exit 1
 fi
 
+# Recorded for diagnostics only: the registry is keyed by name, not by session.
+SESSION="$(tmux display-message -p -t "$PANE" '#{session_name}' 2>/dev/null || true)"
+case "$SESSION" in
+  ''|*[[:space:]]*) SESSION='-' ;;
+esac
+
 if [ -z "$AGENT_PID" ]; then
   AGENT_PID="$PANE_PID"
 fi
@@ -50,23 +56,23 @@ TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$AGENTS_DIR/regist
 trap 'rm -f "$TMP"' EXIT
 
 if [ ! -f "$REGISTRY" ]; then
-  printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n%-15s %-15s %-15s %s\n' \
-    "$NAME" "$PANE" "$PANE_PID" "$AGENT_PID" > "$TMP"
+  printf '# agent-name    tmux-pane-id    pane-pid        agent-pid       tmux-session\n%-15s %-15s %-15s %-15s %s\n' \
+    "$NAME" "$PANE" "$PANE_PID" "$AGENT_PID" "$SESSION" > "$TMP"
 else
-  awk -v name="$NAME" -v pane="$PANE" -v pane_pid="$PANE_PID" -v agent_pid="$AGENT_PID" '
+  awk -v name="$NAME" -v pane="$PANE" -v pane_pid="$PANE_PID" -v agent_pid="$AGENT_PID" -v session="$SESSION" '
     BEGIN { found = 0 }
     { sub(/\r$/, "") }
     /^[[:space:]]*($|#)/ { print; next }
     tolower($1) == tolower(name) {
       if (!found) {
-        printf "%-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid
+        printf "%-15s %-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid, session
         found = 1
       }
       next
     }
     { print }
     END {
-      if (!found) printf "%-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid
+      if (!found) printf "%-15s %-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid, session
     }
   ' "$REGISTRY" > "$TMP"
 fi
@@ -74,4 +80,4 @@ fi
 mv -f "$TMP" "$REGISTRY"
 trap - EXIT
 
-echo "Registered $NAME -> $PANE (pane pid: $PANE_PID, agent pid: $AGENT_PID, $REGISTRY)"
+echo "Registered $NAME -> $PANE in session $SESSION (pane pid: $PANE_PID, agent pid: $AGENT_PID, $REGISTRY)"

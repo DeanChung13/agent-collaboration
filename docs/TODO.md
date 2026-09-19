@@ -22,7 +22,13 @@ pane 上——訊息會全部灌進對方的 session。
 
 修法：SKILL.md 改成 `echo "$TMUX_PANE"`，或 `tmux display-message -p -t "$TMUX_PANE" '#{pane_id}'`。
 
-## 2. `join` 不解析 flag，會把 `--help` 註冊成 agent 名字（中）
+## 2. ~~`join` 不解析 flag，會把 `--help` 註冊成 agent 名字~~（已修）
+
+> 已於「join 加上撞名守門與 `--force`」一併修正：`join` 分支改為完整解析選項，
+> `-h|--help` 先攔截並印出用法，未知的 `-` 開頭參數直接報錯，都不會寫入 registry。
+> 回歸測試：`agent-collab join parses options instead of registering them`。
+
+原始記錄：
 
 `scripts/agent-collab:92-99` 的 `join)` 分支只檢查參數個數，直接把 `$1` 當名字傳給
 `agent-register`。`-h|--help` 的處理在 `:143`，位於主 case 的後面，輪不到。

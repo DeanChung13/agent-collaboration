@@ -112,7 +112,9 @@ codex
 
 - `agent-collab add <agent-name>`：建立新的 tmux pane、啟動指定 AI，並確認完成註冊。若該名稱已有存活中的 session 則拒絕啟動第二個，並回報目前佔用該名稱的 pane；正常情況由 skill 自行呼叫。
 - `agent-collab run <agent-name>`：在新 pane 內註冊並啟動 AI，讓 registry 項目跟隨 AI 程序的生命週期。
-- `agent-collab join <agent-name>`：只註冊目前 pane，不啟動 AI；保留給手動設定與向下相容用途。
+- `agent-collab join [--force] <agent-name>`：只註冊目前 pane，不啟動 AI；保留給手動設定與向下相容用途。若該名稱已被另一個存活的 pane 佔用，會直接拒絕——因為 registry 以名稱為索引且涵蓋整個 repository，重複註冊會把該 agent 的訊息靜默改寄到新的 pane。確定要接管時才加上 `--force`。
+
+registry 是每個 repository 一份的檔案（`.agents/registry`），**不**以 tmux session 分區：同一個 repository 開兩個 session 會共用同一組名稱。請為第二個 session 的 agent 取不同名字（`claude-2`、`codex-2`）。`tmux-session` 欄位僅供診斷並由 `list` 顯示，不參與名稱判定。
 - `agent-collab list`：列出仍存活的協作 agent，並以原子操作移除 AI 程序已結束或 pane 身分已改變的項目。
 - `agent-collab send <agent-name> <message>`：將 prompt 直接投遞至目標 agent pane。
 
