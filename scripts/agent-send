@@ -22,18 +22,25 @@ fi
 LOOKUP="$(awk -v agent="$AGENT" '
   { sub(/\r$/, "") }
   /^[[:space:]]*($|#)/ { next }
-  tolower($1) == tolower(agent) { print $2 " " $3 " " $4; exit }
+  tolower($1) == tolower(agent) {
+    printf "%s %s %s %s\n", $2, ($3 == "" ? "-" : $3), ($4 == "" ? "-" : $4), ($6 == "" ? "-" : $6)
+    exit
+  }
 ' "$REGISTRY")"
-read -r PANE EXPECTED_PANE_PID EXPECTED_AGENT_PID <<< "$LOOKUP"
+read -r PANE EXPECTED_PANE_PID EXPECTED_AGENT_PID EXPECTED_COMMAND <<< "$LOOKUP"
 
 if [ -z "$LOOKUP" ] || [ -z "$PANE" ]; then
   echo "Agent not registered: $AGENT" >&2
   exit 1
 fi
 
-if [ -z "$EXPECTED_PANE_PID" ] || [ -z "$EXPECTED_AGENT_PID" ]; then
+if [ -z "$EXPECTED_PANE_PID" ] || [ "$EXPECTED_PANE_PID" = '-' ] || \
+   [ -z "$EXPECTED_AGENT_PID" ] || [ "$EXPECTED_AGENT_PID" = '-' ]; then
   echo "Stale or legacy registry entry for $AGENT (missing lifecycle PID in $REGISTRY)." >&2
-  echo "Re-run agent-register in that session." >&2
+  echo "The columns are: agent-name pane-id pane-pid agent-pid tmux-session pane-command." >&2
+  echo "You cannot fix this from the other agent's pane, so do one of these instead:" >&2
+  echo "  - run 'agent-collab repair $AGENT' from here to rebuild the entry from live tmux state, or" >&2
+  echo "  - ask that agent to re-run 'agent-collab join $AGENT' in its own pane." >&2
   exit 1
 fi
 
@@ -58,6 +65,13 @@ fi
 if [ -n "${TMUX_PANE:-}" ] && [ "$PANE" = "$TMUX_PANE" ]; then
   echo "Refusing to send to yourself: $AGENT is this pane ($PANE)" >&2
   exit 1
+fi
+
+CURRENT_COMMAND="$(tmux display-message -p -t "$PANE" '#{pane_current_command}' 2>/dev/null || true)"
+if [ -n "$EXPECTED_COMMAND" ] && [ "$EXPECTED_COMMAND" != '-' ] && \
+   [ -n "$CURRENT_COMMAND" ] && [ "$CURRENT_COMMAND" != "$EXPECTED_COMMAND" ]; then
+  echo "Warning: pane $PANE is running '$CURRENT_COMMAND' but $AGENT was registered as '$EXPECTED_COMMAND'." >&2
+  echo "Delivering anyway; verify the reply comes from $AGENT before trusting it." >&2
 fi
 
 PANE_IN_MODE="$(tmux display-message -p -t "$PANE" '#{pane_in_mode}' 2>/dev/null || true)"

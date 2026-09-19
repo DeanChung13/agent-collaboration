@@ -19,6 +19,7 @@ Commands:
   run <name>              Register this pane and launch a supported AI CLI
   join [--force] <name>   Register the current pane without launching a CLI
   list                    List all registered agents in this repository
+  repair <name>           Rebuild a legacy or incomplete entry from live tmux state
   send <agent> <message>  Send a prompt to another registered agent
 
 Options:
@@ -200,9 +201,9 @@ case "$cmd" in
     fi
     TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$ROOT/.agents/registry.tmp.XXXXXX")"
     trap 'rm -f "$TMP"' EXIT
-    printf '# agent-name    tmux-pane-id    pane-pid        agent-pid       tmux-session\n' > "$TMP"
+    printf '# agent-name    tmux-pane-id    pane-pid        agent-pid       tmux-session    pane-command\n' > "$TMP"
     ENTRIES=""
-    while read -r name pane pane_pid agent_pid session _; do
+    while read -r name pane pane_pid agent_pid session command _; do
       case "$name" in ''|'#'*) continue ;; esac
       [ -n "$agent_pid" ] || continue
       if ! kill -0 "$agent_pid" 2>/dev/null; then
@@ -219,8 +220,17 @@ case "$cmd" in
       case "$current_session" in
         ''|*[[:space:]]*) current_session='-' ;;
       esac
-      printf '%-15s %-15s %-15s %-15s %s\n' "$name" "$pane" "$pane_pid" "$agent_pid" "$current_session" >> "$TMP"
-      ENTRIES="${ENTRIES}  $(printf '%-15s %-15s %-10s (pid: %s)' "$name" "$current_session" "$pane" "$agent_pid")
+      current_command="$(tmux display-message -p -t "$pane" '#{pane_current_command}' 2>/dev/null || true)"
+      case "$current_command" in
+        ''|*[[:space:]]*) current_command="${command:--}" ;;
+      esac
+      case "$current_command" in
+        ''|*[[:space:]]*) current_command='-' ;;
+      esac
+      printf '%-15s %-15s %-15s %-15s %-15s %s\n' \
+        "$name" "$pane" "$pane_pid" "$agent_pid" "$current_session" "$current_command" >> "$TMP"
+      ENTRIES="${ENTRIES}  $(printf '%-15s %-15s %-10s (pid: %s, cmd: %s)' \
+        "$name" "$current_session" "$pane" "$agent_pid" "$current_command")
 "
     done < "$REGISTRY"
     mv -f "$TMP" "$REGISTRY"
@@ -231,6 +241,70 @@ case "$cmd" in
     fi
     echo "Registered agents:"
     printf '%s' "$ENTRIES"
+    ;;
+  repair)
+    shift
+    if [ "$#" -ne 1 ]; then
+      echo "Usage: agent-collab repair <agent-name>" >&2
+      exit 1
+    fi
+    repair_name="$1"
+    ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    REGISTRY="$ROOT/.agents/registry"
+    if [ ! -f "$REGISTRY" ]; then
+      echo "Agent registry not found: $REGISTRY" >&2
+      exit 1
+    fi
+    repair_pane="$(awk -v agent="$repair_name" '
+      { sub(/\r$/, "") }
+      /^[[:space:]]*($|#)/ { next }
+      tolower($1) == tolower(agent) { print $2; exit }
+    ' "$REGISTRY")"
+    if [ -z "$repair_pane" ]; then
+      echo "Agent not registered: $repair_name" >&2
+      echo "Nothing to repair. Register it from its own pane with 'agent-collab join $repair_name'." >&2
+      exit 1
+    fi
+    if ! tmux list-panes -a -F '#{pane_id}' 2>/dev/null | grep -Fqx -- "$repair_pane"; then
+      echo "tmux pane no longer exists: $repair_pane" >&2
+      echo "The $repair_name session is gone; repair cannot guess a replacement pane." >&2
+      echo "Restart that agent and register it from its own pane." >&2
+      exit 1
+    fi
+    repair_pane_pid="$(tmux display-message -p -t "$repair_pane" '#{pane_pid}' 2>/dev/null || true)"
+    if [ -z "$repair_pane_pid" ]; then
+      echo "Error: Failed to obtain pane_pid for pane $repair_pane from tmux." >&2
+      exit 1
+    fi
+    repair_session="$(tmux display-message -p -t "$repair_pane" '#{session_name}' 2>/dev/null || true)"
+    case "$repair_session" in
+      ''|*[[:space:]]*) repair_session='-' ;;
+    esac
+    repair_command="$(tmux display-message -p -t "$repair_pane" '#{pane_current_command}' 2>/dev/null || true)"
+    case "$repair_command" in
+      ''|*[[:space:]]*) repair_command='-' ;;
+    esac
+    TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$ROOT/.agents/registry.tmp.XXXXXX")"
+    trap 'rm -f "$TMP"' EXIT
+    awk -v name="$repair_name" -v pane="$repair_pane" -v pane_pid="$repair_pane_pid" \
+      -v session="$repair_session" -v command="$repair_command" '
+      BEGIN { found = 0 }
+      { sub(/\r$/, "") }
+      /^[[:space:]]*($|#)/ { print; next }
+      tolower($1) == tolower(name) {
+        if (!found) {
+          printf "%-15s %-15s %-15s %-15s %-15s %s\n", name, pane, pane_pid, pane_pid, session, command
+          found = 1
+        }
+        next
+      }
+      { print }
+    ' "$REGISTRY" > "$TMP"
+    mv -f "$TMP" "$REGISTRY"
+    trap - EXIT
+    echo "Repaired $repair_name -> $repair_pane in session $repair_session (pane pid: $repair_pane_pid, cmd: $repair_command)"
+    echo "Note: agent-pid was rebound to the pane's root process ($repair_pane_pid)."
+    echo "If that agent was launched by 'agent-collab run', re-register from its own pane for an exact lifecycle binding."
     ;;
   -h|--help|help)
     usage

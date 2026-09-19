@@ -145,6 +145,10 @@ The registry is one file per repository (`.agents/registry`) and is **not** scop
 - `agent-collab list`: Lists live co-agents and atomically removes entries whose agent process exited or whose pane identity changed.
 - `agent-collab send <agent-name> <message>`: Delivers a prompt directly to the target agent pane.
 
+- `agent-collab repair <agent-name>`: Rebuilds a legacy or incomplete registry entry from live tmux state, so a caller can recover another agent's broken entry without hand-editing `.agents/registry`. It refuses to guess when the pane is gone. The rebuilt `agent-pid` points at the pane's root process, which is a weaker binding than a fresh registration from that agent's own pane.
+
+The registry also records the pane's foreground command at registration time. `send` warns when the pane is no longer running that command, but still delivers, because a CLI's process name often differs from its agent name (`codex` runs as `node`).
+
 The low-level primitives (`agent-register`, `agent-send`) and the `agent-join` alias remain available for backward compatibility.
 
 ## Security model

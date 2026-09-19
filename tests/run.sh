@@ -40,6 +40,7 @@ case "${1:-}" in
       *'#{pane_in_mode}'*) printf '%s\n' "${MOCK_PANE_IN_MODE:-0}" ;;
       *'#{pane_pid}'*) printf '%s\n' "${MOCK_PANE_PID:-4242}" ;;
       *'#{session_name}'*) printf '%s\n' "${MOCK_SESSION_NAME:-work}" ;;
+      *'#{pane_current_command}'*) printf '%s\n' "${MOCK_PANE_COMMAND:-node}" ;;
       *) printf '%s\n' "${MOCK_PANE_PID:-4242}" ;;
     esac
     ;;
@@ -162,6 +163,10 @@ assert_contains "$(cat "$SKILL_FILE")" '"$AGENT_COLLAB" join <your-own-agent-nam
 assert_contains "$(cat "$SKILL_FILE")" '`add` and `join` both refuse a name that is' 'SKILL.md documents the duplicate refusal'
 assert_contains "$(cat "$SKILL_FILE")" 'keyed by' 'SKILL.md explains the registry is not scoped by tmux session'
 assert_contains "$(cat "$SKILL_FILE")" 'join --force <agent-name>' 'SKILL.md documents the join override'
+if grep -Fq "tmux display-message -p '#{pane_id}'" "$SKILL_FILE"; then
+  fail 'SKILL.md must not teach the -t-less display-message form (it returns the active pane, not the caller)'
+fi
+assert_contains "$(cat "$SKILL_FILE")" 'display-message -p -t "$TMUX_PANE"' 'SKILL.md pins pane identity to the calling pane'
 pass 'SKILL.md requires self-registration before adding collaborators'
 
 # 5. Arbitrary installation directory & symlinked CLI execution
@@ -489,5 +494,73 @@ if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=42
   fail 'agent-collab send should refuse to send to itself'
 fi
 pass 'agent-collab send refuses self-delivery'
+
+# the registry records the pane's foreground command
+CMD_PROJECT="$TEST_ROOT/cmd-project"
+mkdir -p "$CMD_PROJECT/.agents"
+MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$CMD_PROJECT" MOCK_PANE_PID="$$" \
+  MOCK_SESSION_NAME='keyly' MOCK_PANE_COMMAND='codex' TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" \
+  "$REPO_ROOT/scripts/agent-collab" join codex >/dev/null
+[ "$(awk '$1 == "codex" { print $6 }' "$CMD_PROJECT/.agents/registry")" = 'codex' ] || \
+  fail 'registry should record the pane command in column 6'
+[ "$(awk '$1 == "codex" { print $4 }' "$CMD_PROJECT/.agents/registry")" = "$$" ] || \
+  fail 'agent-pid must stay in column 4 after adding the command column'
+pass 'agent-register records the pane command without moving existing columns'
+
+# send warns when the pane no longer runs what was registered, but still delivers
+MISMATCH_OUT="$TEST_ROOT/send-mismatch.out"
+MISMATCH_ERR="$TEST_ROOT/send-mismatch.err"
+MOCK_TMUX_LOG="$TEST_ROOT/tmux-mismatch.log" MOCK_GIT_ROOT="$CMD_PROJECT" MOCK_PANE_PID="$$" \
+  MOCK_PANE_COMMAND='agy' TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" \
+  "$REPO_ROOT/scripts/agent-collab" send codex 'hello' >"$MISMATCH_OUT" 2>"$MISMATCH_ERR"
+assert_contains "$(cat "$MISMATCH_ERR")" "is running 'agy' but codex was registered as 'codex'" \
+  'send warns when the pane command drifted'
+assert_contains "$(cat "$MISMATCH_OUT")" 'Sent to codex' 'send still delivers after warning'
+pass 'agent-collab send warns on a pane-command mismatch without blocking'
+
+# legacy entries missing agent-pid point at repair instead of dead-ending
+LEGACY_SEND="$TEST_ROOT/legacy-send"
+mkdir -p "$LEGACY_SEND/.agents"
+printf '%-15s %-15s %s\n' 'gemini' '%1' '4242' > "$LEGACY_SEND/.agents/registry"
+LEGACY_ERR="$TEST_ROOT/legacy-send.err"
+if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$LEGACY_SEND" MOCK_PANE_PID=4242 \
+  TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" send gemini 'hi' \
+  >/dev/null 2>"$LEGACY_ERR"; then
+  fail 'send should refuse a legacy entry missing the lifecycle pid'
+fi
+assert_contains "$(cat "$LEGACY_ERR")" 'agent-collab repair gemini' 'send names the repair path'
+assert_contains "$(cat "$LEGACY_ERR")" 'agent-name pane-id pane-pid agent-pid' 'send documents the column format'
+pass 'agent-collab send offers a recovery path for legacy entries'
+
+# repair rebuilds the entry from live tmux state and unblocks send
+REPAIR_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$LEGACY_SEND" MOCK_PANE_PID="$$" \
+  MOCK_SESSION_NAME='keyly' MOCK_PANE_COMMAND='gemini' TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" \
+  "$REPO_ROOT/scripts/agent-collab" repair gemini)"
+assert_contains "$REPAIR_OUT" 'Repaired gemini -> %1 in session keyly' 'repair reports the rebuilt binding'
+[ "$(awk '$1 == "gemini" { print $4 }' "$LEGACY_SEND/.agents/registry")" = "$$" ] || \
+  fail 'repair should fill in the agent-pid column'
+[ "$(awk '$1 == "gemini" { print $6 }' "$LEGACY_SEND/.agents/registry")" = 'gemini' ] || \
+  fail 'repair should record the pane command'
+REPAIRED_SEND="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$LEGACY_SEND" MOCK_PANE_PID="$$" \
+  MOCK_PANE_COMMAND='gemini' TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" \
+  "$REPO_ROOT/scripts/agent-collab" send gemini 'hi')"
+assert_contains "$REPAIRED_SEND" 'Sent to gemini (%1)' 'send works after repair'
+pass 'agent-collab repair rebuilds a legacy entry from live tmux state'
+
+# repair refuses to guess when the pane or the name is gone
+REPAIR_GONE_ERR="$TEST_ROOT/repair-gone.err"
+printf '%-15s %-15s %s\n' 'ghost' '%99' '4242' > "$LEGACY_SEND/.agents/registry"
+if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$LEGACY_SEND" MOCK_PANE_PID=4242 \
+  TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" repair ghost \
+  >/dev/null 2>"$REPAIR_GONE_ERR"; then
+  fail 'repair should refuse a pane that no longer exists'
+fi
+assert_contains "$(cat "$REPAIR_GONE_ERR")" 'cannot guess a replacement pane' 'repair refuses to guess a pane'
+if MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$LEGACY_SEND" MOCK_PANE_PID=4242 \
+  TMUX_PANE='%2' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" repair nobody \
+  >/dev/null 2>&1; then
+  fail 'repair should refuse an unregistered name'
+fi
+pass 'agent-collab repair refuses missing panes and unknown names'
 
 echo "1..$pass_count"

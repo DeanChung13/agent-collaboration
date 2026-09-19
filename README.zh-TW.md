@@ -118,6 +118,10 @@ registry 是每個 repository 一份的檔案（`.agents/registry`），**不**�
 - `agent-collab list`：列出仍存活的協作 agent，並以原子操作移除 AI 程序已結束或 pane 身分已改變的項目。
 - `agent-collab send <agent-name> <message>`：將 prompt 直接投遞至目標 agent pane。
 
+- `agent-collab repair <agent-name>`：依 registry 既有的 pane id 向 tmux 查回現況，補齊舊格式或殘缺的項目，讓呼叫端不必手動編輯 `.agents/registry` 就能修復別人的項目。pane 已不存在時直接拒絕，不猜替代 pane。修復後的 `agent-pid` 綁定的是 pane 的根行程，比該 agent 自己重新註冊弱一些。
+
+registry 另會在註冊當下記錄 pane 的前景指令。`send` 偵測到 pane 已不是當初註冊的指令時會警告，但仍然投遞——因為 CLI 的行程名常與 agent 名不同（`codex` 顯示為 `node`），硬擋會大量誤判。
+
 底層原始腳本（`agent-register`、`agent-send`）與別名 `agent-join` 依然保留，以提供向下相容性。
 
 ## 安全模型

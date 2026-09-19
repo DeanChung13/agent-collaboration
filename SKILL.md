@@ -25,6 +25,9 @@ being told to run shell commands themselves.
   agent name alone. It is not scoped by tmux session: two sessions open on the
   same repository share one set of names. The `tmux-session` column is recorded
   for diagnostics only and never disambiguates a name.
+- `agent-collab repair <name>` rebuilds an incomplete or legacy entry from live
+  tmux state. Run it from your own pane when `send` reports a missing lifecycle
+  PID; it never guesses a replacement pane.
 - `agent-collab list` displays live co-agents and removes entries whose AI process
   exited or whose pane identity changed.
 - `agent-collab send` pastes a prompt into a registered pane and submits it.
@@ -46,6 +49,7 @@ AGENT_COLLAB="$SKILL_DIR/scripts/agent-collab"
 "$AGENT_COLLAB" add <agent-name>
 "$AGENT_COLLAB" run <agent-name>
 "$AGENT_COLLAB" list
+"$AGENT_COLLAB" repair <agent-name>
 "$AGENT_COLLAB" send <agent-name> "<message>"
 ```
 
@@ -153,7 +157,11 @@ The scripts stop rather than guessing:
 - `Agent not registered`: check the name or register that session.
 - `tmux pane no longer exists`: the peer session ended; restart and re-register it.
 - `Stale registry entry`: the pane was reassigned; re-register the peer.
-- `missing pane-pid`: re-register to replace the legacy registry entry.
+- `missing pane-pid` or `missing lifecycle PID`: run `"$AGENT_COLLAB" repair <name>`
+  from your own pane, or ask that agent to re-join from its pane. Do not hand-edit
+  the registry.
+- `Warning: pane ... is running '<cmd>' but <name> was registered as '<cmd>'`: the
+  message was still delivered; confirm the reply actually came from that agent.
 - `Refusing to send to yourself`: choose the other registered agent.
 
 Do not scan tmux for a replacement pane after a stale or missing-pane error. A

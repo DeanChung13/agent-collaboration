@@ -32,6 +32,13 @@ case "$SESSION" in
   ''|*[[:space:]]*) SESSION='-' ;;
 esac
 
+# The foreground command at registration time. `send` compares against it to warn
+# when a pane is no longer running what it was registered as.
+COMMAND="$(tmux display-message -p -t "$PANE" '#{pane_current_command}' 2>/dev/null || true)"
+case "$COMMAND" in
+  ''|*[[:space:]]*) COMMAND='-' ;;
+esac
+
 if [ -z "$AGENT_PID" ]; then
   AGENT_PID="$PANE_PID"
 fi
@@ -56,8 +63,8 @@ TMP="$(mktemp "${REGISTRY}.tmp.XXXXXX" 2>/dev/null || mktemp "$AGENTS_DIR/regist
 trap 'rm -f "$TMP"' EXIT
 
 if [ ! -f "$REGISTRY" ]; then
-  printf '# agent-name    tmux-pane-id    pane-pid        agent-pid       tmux-session\n%-15s %-15s %-15s %-15s %s\n' \
-    "$NAME" "$PANE" "$PANE_PID" "$AGENT_PID" "$SESSION" > "$TMP"
+  printf '# agent-name    tmux-pane-id    pane-pid        agent-pid       tmux-session    pane-command\n%-15s %-15s %-15s %-15s %-15s %s\n' \
+    "$NAME" "$PANE" "$PANE_PID" "$AGENT_PID" "$SESSION" "$COMMAND" > "$TMP"
 else
   awk -v name="$NAME" -v pane="$PANE" -v pane_pid="$PANE_PID" -v agent_pid="$AGENT_PID" -v session="$SESSION" '
     BEGIN { found = 0 }
@@ -65,14 +72,14 @@ else
     /^[[:space:]]*($|#)/ { print; next }
     tolower($1) == tolower(name) {
       if (!found) {
-        printf "%-15s %-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid, session
+        printf "%-15s %-15s %-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid, session, command
         found = 1
       }
       next
     }
     { print }
     END {
-      if (!found) printf "%-15s %-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid, session
+      if (!found) printf "%-15s %-15s %-15s %-15s %-15s %s\n", name, pane, pane_pid, agent_pid, session, command
     }
   ' "$REGISTRY" > "$TMP"
 fi
