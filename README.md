@@ -56,14 +56,18 @@ The installer copies the runtime skill to
 - `~/.claude/skills/agent-collaboration` for Claude Code
 - `~/.gemini/skills/agent-collaboration` for Gemini CLI and Antigravity
 
-Make sure `~/.local/bin` is in your `$PATH` to run `agent-collab` directly from any terminal.
+The installer warns when the selected bin directory is absent from the current
+shell's `$PATH`, and prints the exact export to add to your shell profile. This
+PATH entry is only needed for humans invoking `agent-collab` directly. AI hosts
+use the bundled CLI resolved from their loaded `SKILL.md`, so a stale host PATH
+snapshot cannot select a missing or different installation.
 
 Use `./install.sh --link` while developing to link directly to your clone. The
-installer refuses to replace existing paths. `--force` moves conflicts to
-timestamped backups before installing.
+installer refuses to replace existing paths. `--force` overwrites conflicting
+installs directly.
 
-To update a copy-mode installation from a newer clone, run `./install.sh --force`.
-The previous canonical copy is preserved as a timestamped backup.
+To update a copy-mode installation from a newer clone, run `./install.sh --force`
+to overwrite with the latest version.
 
 Gemini CLI also supports installing a published repository directly:
 
@@ -102,7 +106,9 @@ tmux new-session -s agents
 codex
 ```
 
-3. Ask the AI to add a collaborator:
+3. Ask the AI to add a collaborator. The skill first registers the session it is
+   already running in, so that session's own name is taken and the AI cannot
+   start a duplicate of itself:
 
 ```text
 Add Claude as a collaborator.
@@ -120,17 +126,18 @@ Which agents are collaborating?
 Ask Claude to review the current diff.
 ```
 
-> **Note**: If `agent-collab` is not in your `$PATH`, you can invoke it directly via `SKILL_DIR`:
+> **Note**: AI hosts should always invoke the bundled CLI via `SKILL_DIR`, independent of `$PATH`:
 > ```sh
 > SKILL_DIR="<directory where your host installed agent-collaboration>"
-> "$SKILL_DIR/scripts/agent-collab" add claude
+> AGENT_COLLAB="$SKILL_DIR/scripts/agent-collab"
+> "$AGENT_COLLAB" add claude
 > ```
 
 ### Unified CLI: agent-collab
 
 `agent-collab` provides a single entry point for all operations:
 
-- `agent-collab add <agent-name>`: Creates a new tmux pane, starts the requested AI, and confirms registration. This is normally called by the skill.
+- `agent-collab add <agent-name>`: Creates a new tmux pane, starts the requested AI, and confirms registration. Refuses to start a second session under a name that is already live, and reports the pane holding it. This is normally called by the skill.
 - `agent-collab run <agent-name>`: Registers and launches an AI inside the new pane while binding the registry entry to its process lifecycle.
 - `agent-collab join <agent-name>`: Registers the current pane without launching an AI; retained for manual setup and backward compatibility.
 - `agent-collab list`: Lists live co-agents and atomically removes entries whose agent process exited or whose pane identity changed.

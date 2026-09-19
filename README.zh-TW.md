@@ -46,11 +46,11 @@ Clone 此儲存庫，然後執行：
 - `~/.claude/skills/agent-collaboration`：供 Claude Code 使用
 - `~/.gemini/skills/agent-collaboration`：供 Gemini CLI 與 Antigravity 使用
 
-請確保 `~/.local/bin` 已包含在你的 `$PATH` 中，以便在任何終端機中直接執行 `agent-collab`。
+若目前 shell 的 `$PATH` 未包含所選 bin 目錄，安裝程式會提出警告，並顯示應加入 shell profile 的確切 export 指令。只有使用者在終端機直接呼叫 `agent-collab` 時需要這個 PATH；AI host 會從已載入的 `SKILL.md` 解析 bundled CLI，因此不會因 host 保留舊的 PATH 快照而找不到指令或選到不同安裝。
 
-在開發時可使用 `./install.sh --link` 直接連結到你的 clone 目錄。安裝程式預設拒絕替換既有路徑；使用 `--force` 會在安裝前將衝突路徑移動至帶有時間戳記的備份目錄。
+在開發時可使用 `./install.sh --link` 直接連結到你的 clone 目錄。安裝程式預設拒絕替換既有路徑；使用 `--force` 會直接覆蓋衝突的既有安裝。
 
-若要從較新的 clone 更新 copy 模式的安裝，請執行 `./install.sh --force`。先前的 canonical 複本將會保留為帶有時間戳記的備份。
+若要從較新的 clone 更新 copy 模式的安裝，請執行 `./install.sh --force` 直接覆蓋為最新版。
 
 Gemini CLI 亦支援直接安裝已發布的儲存庫：
 
@@ -81,7 +81,7 @@ tmux new-session -s agents
 codex
 ```
 
-3. 直接請 AI 新增協作者：
+3. 直接請 AI 新增協作者。Skill 會先註冊自己目前所在的 session，確保該 session 自身的名稱已被佔用，避免 AI 重複啟動另一個自己：
 
 ```text
 新增協作 claude
@@ -99,17 +99,18 @@ codex
 請 Claude review 目前的 diff
 ```
 
-> **注意**：若 `agent-collab` 尚未加入 `$PATH`，亦可直接透過 `SKILL_DIR` 呼叫：
+> **注意**：AI host 應一律透過 `SKILL_DIR` 呼叫 bundled CLI，不依賴 `$PATH`：
 > ```sh
 > SKILL_DIR="<你的 host 安裝 agent-collaboration 的目錄>"
-> "$SKILL_DIR/scripts/agent-collab" add claude
+> AGENT_COLLAB="$SKILL_DIR/scripts/agent-collab"
+> "$AGENT_COLLAB" add claude
 > ```
 
 ### 統一 CLI：agent-collab
 
 `agent-collab` 提供單一入口處理所有協作操作：
 
-- `agent-collab add <agent-name>`：建立新的 tmux pane、啟動指定 AI，並確認完成註冊；正常情況由 skill 自行呼叫。
+- `agent-collab add <agent-name>`：建立新的 tmux pane、啟動指定 AI，並確認完成註冊。若該名稱已有存活中的 session 則拒絕啟動第二個，並回報目前佔用該名稱的 pane；正常情況由 skill 自行呼叫。
 - `agent-collab run <agent-name>`：在新 pane 內註冊並啟動 AI，讓 registry 項目跟隨 AI 程序的生命週期。
 - `agent-collab join <agent-name>`：只註冊目前 pane，不啟動 AI；保留給手動設定與向下相容用途。
 - `agent-collab list`：列出仍存活的協作 agent，並以原子操作移除 AI 程序已結束或 pane 身分已改變的項目。

@@ -11,7 +11,7 @@ Usage: ./install.sh [--force] [--link]
 
 Installs agent-collaboration for Codex, Claude Code, and Gemini CLI.
 
-  --force  Back up conflicting installs before replacing them.
+  --force  Overwrite existing installs directly.
   --link   Link directly to this clone instead of copying a canonical install.
 EOF
 }
@@ -52,7 +52,7 @@ CODEX_LINK="${CODEX_HOME:-$HOME/.codex}/skills/agent-collaboration"
 CLAUDE_LINK="$HOME/.claude/skills/agent-collaboration"
 GEMINI_LINK="$HOME/.gemini/skills/agent-collaboration"
 
-backup_or_refuse() {
+replace_or_refuse() {
   target="$1"
   desired="$2"
 
@@ -64,19 +64,17 @@ backup_or_refuse() {
   fi
   if [ "$FORCE" -ne 1 ]; then
     echo "Refusing to replace existing path: $target" >&2
-    echo "Re-run with --force to move it to a timestamped backup." >&2
+    echo "Re-run with --force to overwrite." >&2
     exit 1
   fi
-  backup="$target.backup.$(date +%Y%m%d%H%M%S)"
-  mv "$target" "$backup"
-  echo "Backed up $target -> $backup"
+  rm -rf "$target"
 }
 
 install_link() {
   target="$1"
   desired="$2"
   mkdir -p "$(dirname "$target")"
-  backup_or_refuse "$target" "$desired"
+  replace_or_refuse "$target" "$desired"
   if [ ! -L "$target" ] || [ "$(readlink "$target")" != "$desired" ]; then
     ln -s "$desired" "$target"
   fi
@@ -95,7 +93,7 @@ else
   cp "$SCRIPT_DIR/scripts/agent-send" "$STAGING/scripts/agent-send"
   cp "$SCRIPT_DIR/scripts/agent-join" "$STAGING/scripts/agent-join"
   chmod +x "$STAGING/scripts/"*
-  backup_or_refuse "$CANONICAL" "$STAGING"
+  replace_or_refuse "$CANONICAL" "$STAGING"
   mv "$STAGING" "$CANONICAL"
   trap - EXIT
   SOURCE="$CANONICAL"
@@ -113,3 +111,13 @@ echo "Shared agents: $SHARED_LINK"
 echo "Codex:         $CODEX_LINK"
 echo "Claude Code:   $CLAUDE_LINK"
 echo "Gemini:        $GEMINI_LINK"
+
+case ":${PATH:-}:" in
+  *":$BIN_DIR:"*) ;;
+  *)
+    echo "Warning: $BIN_DIR is not in PATH for this shell." >&2
+    echo "Human CLI use: add this line to your shell profile, then restart the shell:" >&2
+    echo "  export PATH=\"$BIN_DIR:\$PATH\"" >&2
+    echo "AI hosts should use the absolute bundled CLI from their loaded SKILL.md." >&2
+    ;;
+esac
