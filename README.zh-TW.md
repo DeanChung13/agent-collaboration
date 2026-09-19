@@ -81,7 +81,7 @@ tmux new-session -s agents
 codex
 ```
 
-3. 直接請 AI 新增協作者：
+3. 直接請 AI 新增協作者。Skill 會先註冊自己目前所在的 session，確保該 session 自身的名稱已被佔用，避免 AI 重複啟動另一個自己：
 
 ```text
 新增協作 claude
@@ -110,7 +110,7 @@ codex
 
 `agent-collab` 提供單一入口處理所有協作操作：
 
-- `agent-collab add <agent-name>`：建立新的 tmux pane、啟動指定 AI，並確認完成註冊；正常情況由 skill 自行呼叫。
+- `agent-collab add <agent-name>`：建立新的 tmux pane、啟動指定 AI，並確認完成註冊。若該名稱已有存活中的 session 則拒絕啟動第二個，並回報目前佔用該名稱的 pane；正常情況由 skill 自行呼叫。
 - `agent-collab run <agent-name>`：在新 pane 內註冊並啟動 AI，讓 registry 項目跟隨 AI 程序的生命週期。
 - `agent-collab join <agent-name>`：只註冊目前 pane，不啟動 AI；保留給手動設定與向下相容用途。
 - `agent-collab list`：列出仍存活的協作 agent，並以原子操作移除 AI 程序已結束或 pane 身分已改變的項目。

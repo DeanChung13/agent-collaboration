@@ -157,6 +157,10 @@ assert_contains "$(cat "$SKILL_FILE")" 'AGENT_COLLAB="$SKILL_DIR/scripts/agent-c
 assert_contains "$(cat "$SKILL_FILE")" 'Do not invoke a bare' 'SKILL.md rejects PATH-dependent agent invocation'
 pass 'SKILL.md contains no hardcoded host paths and requires deterministic bundled CLI resolution'
 
+assert_contains "$(cat "$SKILL_FILE")" '"$AGENT_COLLAB" join <your-own-agent-name>' 'SKILL.md tells the host session to register itself'
+assert_contains "$(cat "$SKILL_FILE")" 'add` refuses a name that is already live' 'SKILL.md documents the duplicate refusal'
+pass 'SKILL.md requires self-registration before adding collaborators'
+
 # 5. Arbitrary installation directory & symlinked CLI execution
 ARBITRARY_DIR="$TEST_ROOT/arbitrary-location/my-skill"
 mkdir -p "$ARBITRARY_DIR/scripts" "$TEST_ROOT/arbitrary-bin"
@@ -237,6 +241,37 @@ ADD_LOG_CONTENT="$(cat "$ADD_TMUX_LOG")"
 assert_contains "$ADD_LOG_CONTENT" 'split-window -d -P -F #{pane_id}' 'add creates a detached tmux pane'
 assert_contains "$ADD_LOG_CONTENT" 'agent-collab run claude' 'add starts the lifecycle launcher in the new pane'
 pass 'agent-collab add creates a pane and starts the requested collaborator'
+
+# agent-collab add refuses a name that is already live in the registry
+DUP_PROJECT="$TEST_ROOT/dup-project"
+mkdir -p "$DUP_PROJECT/.agents"
+printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n%-15s %-15s %-15s %s\n' \
+  'claude' '%6' '4242' "$$" > "$DUP_PROJECT/.agents/registry"
+DUP_TMUX_LOG="$TEST_ROOT/tmux-dup.log"
+DUP_ERR="$TEST_ROOT/add-duplicate.err"
+if MOCK_TMUX_LOG="$DUP_TMUX_LOG" MOCK_GIT_ROOT="$DUP_PROJECT" MOCK_PANE_PID=4242 MOCK_NEW_PANE='%9' \
+  TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" add claude \
+  >/dev/null 2>"$DUP_ERR"; then
+  fail 'agent-collab add should refuse a duplicate live agent'
+fi
+assert_contains "$(cat "$DUP_ERR")" 'already running in %6' 'add names the pane holding the live agent'
+if [ -f "$DUP_TMUX_LOG" ] && grep -Fq 'split-window' "$DUP_TMUX_LOG"; then
+  fail 'agent-collab add should not open a pane when refusing a duplicate'
+fi
+pass 'agent-collab add refuses to start a second live session under the same name'
+
+# A dead or reassigned entry does not block a fresh add
+STALE_PROJECT="$TEST_ROOT/stale-project"
+mkdir -p "$STALE_PROJECT/.agents"
+printf '# agent-name    tmux-pane-id    pane-pid        agent-pid\n%-15s %-15s %-15s %s\n%-15s %-15s %-15s %s\n' \
+  'claude' '%6' '4242' '99999999' 'codex' '%7' '1111' "$$" > "$STALE_PROJECT/.agents/registry"
+STALE_ADD_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux-stale.log" MOCK_GIT_ROOT="$STALE_PROJECT" MOCK_PANE_PID=4242 \
+  MOCK_NEW_PANE='%6' TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" add claude)"
+assert_contains "$STALE_ADD_OUT" 'Added claude in %6' 'add proceeds past a dead agent entry'
+STALE_CODEX_OUT="$(MOCK_TMUX_LOG="$TEST_ROOT/tmux-stale.log" MOCK_GIT_ROOT="$STALE_PROJECT" MOCK_PANE_PID=4242 \
+  MOCK_NEW_PANE='%7' TMUX_PANE='%1' PATH="$MOCK_BIN:$PATH" "$REPO_ROOT/scripts/agent-collab" add codex)"
+assert_contains "$STALE_CODEX_OUT" 'Added codex in %7' 'add proceeds past a reassigned pane entry'
+pass 'agent-collab add ignores dead and reassigned registry entries'
 
 # agent-collab join idempotency
 MOCK_TMUX_LOG="$TEST_ROOT/tmux.log" MOCK_GIT_ROOT="$PROJECT" MOCK_PANE_PID=4242 \

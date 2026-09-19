@@ -106,7 +106,9 @@ tmux new-session -s agents
 codex
 ```
 
-3. Ask the AI to add a collaborator:
+3. Ask the AI to add a collaborator. The skill first registers the session it is
+   already running in, so that session's own name is taken and the AI cannot
+   start a duplicate of itself:
 
 ```text
 Add Claude as a collaborator.
@@ -135,7 +137,7 @@ Ask Claude to review the current diff.
 
 `agent-collab` provides a single entry point for all operations:
 
-- `agent-collab add <agent-name>`: Creates a new tmux pane, starts the requested AI, and confirms registration. This is normally called by the skill.
+- `agent-collab add <agent-name>`: Creates a new tmux pane, starts the requested AI, and confirms registration. Refuses to start a second session under a name that is already live, and reports the pane holding it. This is normally called by the skill.
 - `agent-collab run <agent-name>`: Registers and launches an AI inside the new pane while binding the registry entry to its process lifecycle.
 - `agent-collab join <agent-name>`: Registers the current pane without launching an AI; retained for manual setup and backward compatibility.
 - `agent-collab list`: Lists live co-agents and atomically removes entries whose agent process exited or whose pane identity changed.

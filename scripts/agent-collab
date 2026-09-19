@@ -26,6 +26,26 @@ Options:
 EOF
 }
 
+# Print the pane id of a live registry entry for the given agent name, if any.
+# Liveness matches the `list` command: the agent process must still exist and the
+# pane must still be the one that was registered.
+live_pane() {
+  registry="$1"
+  name="$2"
+  [ -f "$registry" ] || return 0
+  while read -r entry_name entry_pane entry_pane_pid entry_agent_pid _; do
+    case "$entry_name" in ''|'#'*) continue ;; esac
+    [ -n "$entry_agent_pid" ] || continue
+    [ "$(printf '%s' "$entry_name" | tr '[:upper:]' '[:lower:]')" \
+      = "$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')" ] || continue
+    kill -0 "$entry_agent_pid" 2>/dev/null || continue
+    current_pane_pid="$(tmux display-message -p -t "$entry_pane" '#{pane_pid}' 2>/dev/null || true)"
+    [ "$current_pane_pid" = "$entry_pane_pid" ] || continue
+    printf '%s\n' "$entry_pane"
+    return 0
+  done < "$registry"
+}
+
 cmd="${1:-}"
 case "$cmd" in
   add)
@@ -47,9 +67,15 @@ case "$cmd" in
       exit 1
     fi
     ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+    REGISTRY="$ROOT/.agents/registry"
+    existing_pane="$(live_pane "$REGISTRY" "$agent_name")"
+    if [ -n "$existing_pane" ]; then
+      echo "Error: $agent_name is already running in $existing_pane; not starting a second one." >&2
+      echo "Use 'agent-collab send $agent_name <message>' to reach it." >&2
+      exit 1
+    fi
     NEW_PANE="$(tmux split-window -d -P -F '#{pane_id}' -c "$ROOT" \
       "$SCRIPT_DIR/agent-collab" run "$agent_name")"
-    REGISTRY="$ROOT/.agents/registry"
     registered=0
     for _ in {1..50}; do
       if [ -f "$REGISTRY" ] && awk -v name="$agent_name" -v pane="$NEW_PANE" '

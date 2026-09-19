@@ -50,6 +50,15 @@ Low-level primitives `"$SKILL_DIR/scripts/agent-register"`, `"$SKILL_DIR/scripts
 
 ## Add a collaborator
 
+Register your own session before adding anyone. Until you do, your own name
+still looks free in the registry, and `add` will happily start a second copy of
+the AI you already are. Do this once per repository, using the name of the CLI
+you are running:
+
+```sh
+"$AGENT_COLLAB" join <your-own-agent-name>
+```
+
 When the user asks to add or start a collaborator, run:
 
 ```sh
@@ -59,7 +68,10 @@ When the user asks to add or start a collaborator, run:
 Do not ask the user to open a pane or run this command. On success, report the
 agent and pane. If the current session is outside tmux or the executable is
 missing, explain that concrete blocker. Never register two live sessions under
-the same name in one repository.
+the same name in one repository: `add` refuses a name that is already live, and
+reports the pane that holds it. When it refuses, do not work around it by
+picking a different name — reach the existing session with `send`, or tell the
+user that agent is already running.
 
 Before sending work, check live agents:
 
